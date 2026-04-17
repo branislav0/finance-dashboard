@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual env
+.venv/
+venv/
+
+# Secrets — NIKDY do gitu
+.env
+.env.local
+.env.*.local
+.secrets/
+
+# SQLite DB + backups
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+backups/
+
+# User screenshots (local workflow only)
+screenshots/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Obsidian
+.obsidian/
