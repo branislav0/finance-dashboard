@@ -42,7 +42,8 @@ def healthz() -> dict[str, str]:
 def index() -> str:
     accounts = db.list_accounts()
     rows = ["<h1>Finance dashboard</h1>"]
-    rows.append('<p><a href="/connect/mock/SK">+ Connect Mock ASPSP (SK)</a></p>')
+    rows.append('<p><a href="/connect/Revolut/LT">+ Connect Revolut</a></p>')
+    rows.append('<p><small><a href="/connect/mock/SK">(sandbox: Mock ASPSP SK)</a></small></p>')
     if not accounts:
         rows.append("<p><em>No accounts yet.</em></p>")
         return "\n".join(rows)
@@ -68,6 +69,20 @@ def connect_mock(country: str, request: Request) -> RedirectResponse:
         state=state,
     )
     _pending_states[state] = {"aspsp": "Mock ASPSP", "country": country.upper()}
+    return RedirectResponse(url=result["url"], status_code=302)
+
+
+@app.get("/connect/{aspsp_name}/{country}")
+def connect_aspsp(aspsp_name: str, country: str, request: Request) -> RedirectResponse:
+    client = enablebanking_from_env()
+    state = secrets.token_urlsafe(24)
+    result = client.start_auth(
+        aspsp_name=aspsp_name,
+        aspsp_country=country.upper(),
+        redirect_url=_redirect_url(request),
+        state=state,
+    )
+    _pending_states[state] = {"aspsp": aspsp_name, "country": country.upper()}
     return RedirectResponse(url=result["url"], status_code=302)
 
 
