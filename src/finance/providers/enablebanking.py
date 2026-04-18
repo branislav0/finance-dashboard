@@ -107,6 +107,14 @@ class EnableBankingClient:
 
 
 def from_env() -> EnableBankingClient:
-    app_id = os.environ["ENABLEBANKING_APPLICATION_ID"]
-    key_path = os.environ["ENABLEBANKING_PRIVATE_KEY_PATH"]
+    env = os.environ.get("ENABLEBANKING_ENV", "sandbox").lower()
+    prefix = "ENABLEBANKING_PRODUCTION" if env == "production" else "ENABLEBANKING_SANDBOX"
+    app_id = (
+        os.environ.get(f"{prefix}_APPLICATION_ID")
+        or os.environ["ENABLEBANKING_APPLICATION_ID"]
+    )
+    key_path = (
+        os.environ.get(f"{prefix}_PRIVATE_KEY_PATH")
+        or os.environ["ENABLEBANKING_PRIVATE_KEY_PATH"]
+    )
     return EnableBankingClient(application_id=app_id, private_key_path=key_path)
