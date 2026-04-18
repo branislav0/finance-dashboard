@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Finance — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: oklch(0.992 0.002 90);
+    --bg-2: oklch(0.975 0.003 90);
+    --surface: #ffffff;
+    --ink: oklch(0.18 0.005 240);
+    --ink-2: oklch(0.38 0.008 240);
+    --ink-3: oklch(0.58 0.008 240);
+    --ink-4: oklch(0.78 0.006 240);
+    --line: oklch(0.92 0.004 240);
+    --line-2: oklch(0.96 0.003 240);
+    --pos: oklch(0.55 0.14 150);
+    --pos-soft: oklch(0.94 0.05 150);
+    --neg: oklch(0.50 0.16 28);
+    --neg-soft: oklch(0.95 0.04 28);
+    --accent: oklch(0.75 0.17 145); /* conservative */
+    --accent-ink: oklch(0.28 0.08 145);
+    --radius: 10px;
+    --radius-lg: 14px;
+    --shadow-sm: 0 1px 0 oklch(0.9 0.004 240);
+  }
+  :root.exp {
+    --bg: oklch(0.14 0.01 260);
+    --bg-2: oklch(0.17 0.012 260);
+    --surface: oklch(0.19 0.014 260);
+    --ink: oklch(0.97 0.005 260);
+    --ink-2: oklch(0.80 0.01 260);
+    --ink-3: oklch(0.62 0.012 260);
+    --ink-4: oklch(0.42 0.014 260);
+    --line: oklch(0.26 0.015 260);
+    --line-2: oklch(0.22 0.014 260);
+    --pos: oklch(0.80 0.18 150);
+    --pos-soft: oklch(0.26 0.06 150);
+    --neg: oklch(0.72 0.18 28);
+    --neg-soft: oklch(0.28 0.06 28);
+    --accent: oklch(0.70 0.22 265);
+    --accent-ink: oklch(0.95 0.04 265);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-feature-settings: 'ss01', 'cv11'; -webkit-font-smoothing: antialiased; }
+  body { min-height: 100vh; }
+  .mono { font-family: 'Geist Mono', ui-monospace, monospace; font-feature-settings: 'tnum', 'zero'; }
+  .tnum { font-variant-numeric: tabular-nums; }
+  button { font-family: inherit; cursor: pointer; }
+  a { color: inherit; }
+  #root { min-height: 100vh; }
+
+  /* Tweaks panel */
+  .tweaks {
+    position: fixed; right: 16px; bottom: 16px; z-index: 100;
+    width: 280px;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--radius-lg);
+    box-shadow: 0 10px 30px oklch(0.2 0.01 240 / 0.08), 0 2px 6px oklch(0.2 0.01 240 / 0.05);
+    font-size: 13px;
+    display: none;
+  }
+  .tweaks.open { display: block; }
+  .tweaks header { display:flex; align-items:center; justify-content:space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .tweaks h4 { margin:0; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  .tweaks .body { padding: 10px 14px 14px; display:flex; flex-direction:column; gap: 12px; }
+  .tweaks label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color: var(--ink-3); margin-bottom: 6px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
+  .seg button { flex:1; border:0; background: transparent; padding:6px 8px; border-radius:6px; color: var(--ink-2); font-size:12px; }
+  .seg button.active { background: var(--ink); color: var(--bg); }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- Tweaks panel -->
+<div class="tweaks" id="tweaks">
+  <header>
+    <h4>Tweaks</h4>
+    <span class="mono" style="font-size:11px;color:var(--ink-3)">v1.0</span>
+  </header>
+  <div class="body">
+    <div>
+      <label>Variant</label>
+      <div class="seg" id="seg-variant">
+        <button data-v="cons">Konzervatívny</button>
+        <button data-v="exp">Experimentálny</button>
+      </div>
+    </div>
+    <div>
+      <label>Účet</label>
+      <div class="seg" id="seg-account">
+        <button data-a="all">Všetky</button>
+        <button data-a="main">Bežný</button>
+        <button data-a="save">Sporiaci</button>
+        <button data-a="revo">Revolut</button>
+      </div>
+    </div>
+    <div>
+      <label>Mena zobrazenia</label>
+      <div class="seg" id="seg-ccy">
+        <button data-c="CZK">CZK</button>
+        <button data-c="EUR">EUR</button>
+      </div>
+    </div>
+    <div>
+      <label>Mesiac</label>
+      <div class="seg" id="seg-month">
+        <button data-m="jan">Jan</button>
+        <button data-m="feb">Feb</button>
+        <button data-m="mar">Mar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/*EDITMODE-BEGIN*/
+const TWEAK_DEFAULTS = {
+  "variant": "cons",
+  "account": "all",
+  "currency": "CZK",
+  "month": "feb"
+};
+/*EDITMODE-END*/
+
+window.__TWEAKS = { ...TWEAK_DEFAULTS };
+
+// Tweaks wiring
+(function () {
+  const panel = document.getElementById('tweaks');
+  function renderSeg(id, key) {
+    const el = document.getElementById(id);
+    el.querySelectorAll('button').forEach(b => {
+      const v = b.dataset.v || b.dataset.a || b.dataset.c || b.dataset.m;
+      b.classList.toggle('active', v === window.__TWEAKS[key]);
+    });
+  }
+  function refreshAll() {
+    renderSeg('seg-variant','variant');
+    renderSeg('seg-account','account');
+    renderSeg('seg-ccy','currency');
+    renderSeg('seg-month','month');
+    document.documentElement.classList.toggle('exp', window.__TWEAKS.variant === 'exp');
+    window.dispatchEvent(new CustomEvent('tweaks:change', { detail: { ...window.__TWEAKS } }));
+  }
+  document.getElementById('seg-variant').addEventListener('click', e => {
+    const v = e.target?.dataset?.v; if (!v) return;
+    window.__TWEAKS.variant = v; refreshAll(); persist({variant: v});
+  });
+  document.getElementById('seg-account').addEventListener('click', e => {
+    const a = e.target?.dataset?.a; if (!a) return;
+    window.__TWEAKS.account = a; refreshAll(); persist({account: a});
+  });
+  document.getElementById('seg-ccy').addEventListener('click', e => {
+    const c = e.target?.dataset?.c; if (!c) return;
+    window.__TWEAKS.currency = c; refreshAll(); persist({currency: c});
+  });
+  document.getElementById('seg-month').addEventListener('click', e => {
+    const m = e.target?.dataset?.m; if (!m) return;
+    window.__TWEAKS.month = m; refreshAll(); persist({month: m});
+  });
+  function persist(edits){ try{ window.parent.postMessage({type:'__edit_mode_set_keys', edits}, '*'); }catch(e){} }
+
+  // Expose activation protocol
+  window.addEventListener('message', (ev) => {
+    const t = ev.data?.type;
+    if (t === '__activate_edit_mode') panel.classList.add('open');
+    if (t === '__deactivate_edit_mode') panel.classList.remove('open');
+  });
+  window.parent.postMessage({type:'__edit_mode_available'}, '*');
+
+  refreshAll();
+})();
+</script>
+
+<script type="text/babel" src="src/data.jsx"></script>
+<script type="text/babel" src="src/icons.jsx"></script>
+<script type="text/babel" src="src/sparkline.jsx"></script>
+<script type="text/babel" src="src/sidebar.jsx"></script>
+<script type="text/babel" src="src/topbar.jsx"></script>
+<script type="text/babel" src="src/cards.jsx"></script>
+<script type="text/babel" src="src/categories.jsx"></script>
+<script type="text/babel" src="src/transactions.jsx"></script>
+<script type="text/babel" src="src/accounts.jsx"></script>
+<script type="text/babel" src="src/chart.jsx"></script>
+<script type="text/babel" src="src/app.jsx"></script>
+
+</body>
+</html>
