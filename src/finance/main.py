@@ -2,21 +2,28 @@ from __future__ import annotations
 
 import os
 import secrets
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from finance import db
 from finance.providers.enablebanking import from_env as enablebanking_from_env
 
 load_dotenv()
 
-app = FastAPI(title="finance-dashboard")
-
-# In-memory session store — replaced by DB in next step.
 _pending_states: dict[str, dict[str, str]] = {}
-_sessions: dict[str, dict] = {}
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    db.init_db()
+    yield
+
+
+app = FastAPI(title="finance-dashboard", lifespan=lifespan)
 
 
 def _redirect_url(request: Request) -> str:
@@ -29,6 +36,25 @@ def _redirect_url(request: Request) -> str:
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    accounts = db.list_accounts()
+    rows = ["<h1>Finance dashboard</h1>"]
+    rows.append('<p><a href="/connect/mock/SK">+ Connect Mock ASPSP (SK)</a></p>')
+    if not accounts:
+        rows.append("<p><em>No accounts yet.</em></p>")
+        return "\n".join(rows)
+    rows.append("<h2>Accounts</h2><ul>")
+    for a in accounts:
+        rows.append(
+            f'<li>{a["iban"]} ({a["currency"]}) — '
+            f'<a href="/accounts/{a["id"]}/tx">transactions</a> · '
+            f'<a href="/accounts/{a["id"]}/sync">sync now</a></li>'
+        )
+    rows.append("</ul>")
+    return "\n".join(rows)
 
 
 @app.get("/connect/mock/{country}")
@@ -45,8 +71,8 @@ def connect_mock(country: str, request: Request) -> RedirectResponse:
     return RedirectResponse(url=result["url"], status_code=302)
 
 
-@app.get("/callback", name="callback", response_class=HTMLResponse)
-def callback(code: str | None = None, state: str | None = None, error: str | None = None) -> str:
+@app.get("/callback", name="callback")
+def callback(code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
         raise HTTPException(400, f"Auth error: {error}")
     if not code or not state:
@@ -57,47 +83,46 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
 
     client = enablebanking_from_env()
     session = client.create_session(code)
-    session_id = session["session_id"]
-    _sessions[session_id] = session
-
-    accounts = session.get("accounts", [])
-    html = [
-        "<h1>Connected ✅</h1>",
-        f"<p>Session: <code>{session_id}</code></p>",
-        "<h2>Accounts</h2>",
-        "<ul>",
-    ]
-    for a in accounts:
-        iban = a.get("account_id", {}).get("iban", "?")
-        html.append(
-            f"<li><code>{a['uid']}</code> — {iban} ({a.get('currency', '?')}) "
-            f"<a href='/accounts/{a['uid']}/tx'>show transactions</a></li>"
-        )
-    html.append("</ul>")
-    return "\n".join(html)
+    db.save_session_and_accounts(session)
+    return RedirectResponse(url="/", status_code=302)
 
 
-@app.get("/accounts/{account_uid}/tx", response_class=HTMLResponse)
-def show_transactions(account_uid: str) -> str:
+@app.get("/accounts/{account_id}/sync")
+def sync_account(account_id: int) -> RedirectResponse:
+    acc = db.get_account(account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
     client = enablebanking_from_env()
     date_from = (date.today() - timedelta(days=90)).isoformat()
-    data = client.list_transactions(account_uid, date_from=date_from)
-    txs = data.get("transactions", [])
+    data = client.list_transactions(acc["eb_uid"], date_from=date_from)
+    inserted, updated = db.upsert_transactions(account_id, data.get("transactions", []))
+    return RedirectResponse(
+        url=f"/accounts/{account_id}/tx?synced={inserted}_new_{updated}_updated",
+        status_code=302,
+    )
+
+
+@app.get("/accounts/{account_id}/tx", response_class=HTMLResponse)
+def show_transactions(account_id: int, synced: str | None = None) -> str:
+    txs = db.list_transactions(account_id)
+    banner = f'<p><strong>Sync:</strong> {synced.replace("_", " ")}</p>' if synced else ""
     rows = [
+        '<p><a href="/">← back</a></p>',
         "<h1>Transactions</h1>",
-        f"<p>{len(txs)} since {date_from}</p>",
-        "<table border=1 cellpadding=4><tr>"
-        "<th>Date</th><th>Amount</th><th>Currency</th><th>Counterparty</th><th>Info</th></tr>",
+        banner,
+        f"<p>{len(txs)} stored</p>",
+        '<table border=1 cellpadding=4><tr>'
+        "<th>Date</th><th>Amount</th><th>Currency</th><th>Dir</th>"
+        "<th>Counterparty</th><th>Info</th></tr>",
     ]
-    for t in txs[:50]:
-        amt = t.get("transaction_amount", {})
-        cp = (t.get("creditor") or {}).get("name") or (t.get("debtor") or {}).get("name") or ""
-        info = (t.get("remittance_information") or [""])[0]
+    for t in txs:
         rows.append(
-            f"<tr><td>{t.get('booking_date', '')}</td>"
-            f"<td align=right>{amt.get('amount', '')}</td>"
-            f"<td>{amt.get('currency', '')}</td>"
-            f"<td>{cp}</td><td>{info}</td></tr>"
+            f"<tr><td>{t['booking_date'] or ''}</td>"
+            f"<td align=right>{t['amount']}</td>"
+            f"<td>{t['currency']}</td>"
+            f"<td>{t['credit_debit'] or ''}</td>"
+            f"<td>{t['counterparty_name'] or ''}</td>"
+            f"<td>{t['remittance_info'] or ''}</td></tr>"
         )
     rows.append("</table>")
     return "\n".join(rows)
