@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ import jwt
 
 API_BASE = "https://api.enablebanking.com"
 JWT_LIFETIME_SEC = 3600
+DEFAULT_ACCESS_DAYS = 90
 
 
 class EnableBankingClient:
@@ -46,6 +48,59 @@ class EnableBankingClient:
         params = {"country": country} if country else None
         r = httpx.get(
             f"{self.base_url}/aspsps", headers=self._headers(), params=params, timeout=15
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def start_auth(
+        self,
+        aspsp_name: str,
+        aspsp_country: str,
+        redirect_url: str,
+        state: str,
+        psu_type: str = "personal",
+        access_days: int = DEFAULT_ACCESS_DAYS,
+    ) -> dict[str, Any]:
+        valid_until = datetime.now(timezone.utc) + timedelta(days=access_days)
+        body = {
+            "access": {"valid_until": valid_until.isoformat(timespec="seconds").replace("+00:00", "Z")},
+            "aspsp": {"name": aspsp_name, "country": aspsp_country},
+            "state": state,
+            "redirect_url": redirect_url,
+            "psu_type": psu_type,
+        }
+        r = httpx.post(f"{self.base_url}/auth", headers=self._headers(), json=body, timeout=15)
+        r.raise_for_status()
+        return r.json()
+
+    def create_session(self, auth_code: str) -> dict[str, Any]:
+        r = httpx.post(
+            f"{self.base_url}/sessions",
+            headers=self._headers(),
+            json={"code": auth_code},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        r = httpx.get(
+            f"{self.base_url}/sessions/{session_id}", headers=self._headers(), timeout=15
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def list_transactions(
+        self, account_id: str, date_from: str, date_to: str | None = None
+    ) -> dict[str, Any]:
+        params = {"date_from": date_from}
+        if date_to:
+            params["date_to"] = date_to
+        r = httpx.get(
+            f"{self.base_url}/accounts/{account_id}/transactions",
+            headers=self._headers(),
+            params=params,
+            timeout=30,
         )
         r.raise_for_status()
         return r.json()
