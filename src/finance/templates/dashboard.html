@@ -3,11 +3,28 @@
 {% block heading %}Dashboard{% endblock %}
 
 {% block topbar_actions %}
+  <form class="inline" method="get" action="/">
+    <select name="month" onchange="this.form.submit()">
+      {% for m in months %}
+        <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  <a class="btn btn-primary" href="/sync">↻ Sync všetky</a>
   <a class="btn" href="/connect/Revolut/LT">+ Revolut</a>
-  <a class="btn" href="/connect/mock/SK">+ Mock SK</a>
 {% endblock %}
 
 {% block content %}
+{% if synced %}
+  <div class="card" style="margin-bottom:14px; border-color: var(--pos);">
+    <strong style="color: var(--pos);">Sync:</strong> {{ synced.replace('_', ' ') }}
+  </div>
+{% endif %}
+
+<div style="font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px;">
+  Mesiac {{ month }} · CZK
+</div>
+
 <div class="kpi-grid">
   <div class="card">
     <div class="label">Príjem</div>

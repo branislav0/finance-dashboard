@@ -90,15 +90,19 @@ def healthz() -> dict[str, str]:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request):
+def index(request: Request, month: str | None = None, synced: str | None = None):
     accounts = db.list_accounts()
+    today = date.today()
+    if not month:
+        month = today.strftime("%Y-%m")
     income_total = expense_total = 0.0
     tx_count = uncat_count = 0
     with db.connect() as conn:
         for r in conn.execute(
-            "SELECT t.credit_debit, t.amount, t.currency, t.category_id, c.kind "
+            "SELECT t.credit_debit, t.amount, t.category_id, c.kind "
             "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
-            "WHERE t.currency = 'CZK'"
+            "WHERE t.currency = 'CZK' AND substr(t.booking_date, 1, 7) = ?",
+            (month,),
         ):
             tx_count += 1
             if r["category_id"] is None:
@@ -144,11 +148,19 @@ def index(request: Request):
             ).fetchone()[0]
             accounts_view.append({**dict(a), "tx_count": cnt})
 
+    months = []
+    for i in range(6):
+        m = (today.replace(day=1) - timedelta(days=30 * i)).strftime("%Y-%m")
+        if m not in months:
+            months.append(m)
     ctx = {
         "nav": "dashboard",
         "kpi": kpi,
         "recent_tx": recent,
         "accounts": accounts_view,
+        "month": month,
+        "months": months,
+        "synced": synced,
         **_sidebar_context(),
     }
     return templates.TemplateResponse(request, "dashboard.html", ctx)
@@ -271,6 +283,28 @@ def transactions_all(
         **_sidebar_context(),
     }
     return templates.TemplateResponse(request, "transactions_all.html", ctx)
+
+
+@app.get("/sync")
+def sync_all() -> RedirectResponse:
+    accounts = db.list_accounts()
+    if not accounts:
+        return RedirectResponse(url="/accounts", status_code=302)
+    client = enablebanking_from_env()
+    date_from = (date.today() - timedelta(days=90)).isoformat()
+    total_new = total_upd = errors = 0
+    for a in accounts:
+        try:
+            data = client.list_transactions(a["eb_uid"], date_from=date_from)
+            ins, upd = db.upsert_transactions(a["id"], data.get("transactions", []))
+            total_new += ins
+            total_upd += upd
+        except Exception:
+            errors += 1
+    msg = f"synced_{len(accounts)}_accounts_{total_new}_new_{total_upd}_updated"
+    if errors:
+        msg += f"_{errors}_errors"
+    return RedirectResponse(url=f"/?synced={msg}", status_code=302)
 
 
 @app.get("/accounts/{account_id}/sync")
