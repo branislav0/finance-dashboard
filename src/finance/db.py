@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -46,7 +47,47 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 CREATE INDEX IF NOT EXISTS idx_tx_account_date
   ON transactions(account_id, booking_date DESC);
+
+CREATE TABLE IF NOT EXISTS categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('income', 'expense', 'transfer')),
+  UNIQUE (name, parent_id)
+);
+
+CREATE TABLE IF NOT EXISTS category_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+  pattern TEXT NOT NULL,
+  field TEXT NOT NULL CHECK (field IN ('counterparty', 'remittance', 'any')),
+  priority INTEGER NOT NULL DEFAULT 100,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_rules_priority ON category_rules(priority);
 """
+
+SEED_CATEGORIES: list[tuple[str, str, list[str]]] = [
+    ("Príjem z práce", "income", []),
+    ("Vedľajší príjem", "income", []),
+    ("Rodina", "income", []),
+    ("Iné príjmy", "income", []),
+    ("Bývanie", "expense", []),
+    ("Nafta / doprava", "expense", []),
+    ("Supermarkety", "expense", []),
+    ("Oblečenie, topánky", "expense", []),
+    ("Tabak", "expense", []),
+    ("Reštaurácie / fastfood", "expense", []),
+    ("Subscriptions", "expense", []),
+    ("Darčeky", "expense", []),
+    ("Zábava (hry, kultúra)", "expense", []),
+    ("Fitness a zdravie", "expense", []),
+    ("Hygiena", "expense", []),
+    ("Výber z bankomatu", "expense", []),
+    ("Investície", "expense", ["Akcie", "Crypto"]),
+    ("Interné presuny / FX", "transfer", []),
+]
 
 
 def _db_path() -> str:
@@ -70,6 +111,83 @@ def init_db() -> None:
     Path(_db_path()).parent.mkdir(parents=True, exist_ok=True)
     with connect() as conn:
         conn.executescript(SCHEMA)
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(transactions)")}
+        if "category_id" not in cols:
+            conn.execute(
+                "ALTER TABLE transactions ADD COLUMN category_id INTEGER "
+                "REFERENCES categories(id) ON DELETE SET NULL"
+            )
+        if "manual_override" not in cols:
+            conn.execute(
+                "ALTER TABLE transactions ADD COLUMN manual_override INTEGER NOT NULL DEFAULT 0"
+            )
+    _migrate_categories_allow_transfer()
+    _seed_categories_if_empty()
+    _ensure_transfer_category()
+
+
+def _migrate_categories_allow_transfer() -> None:
+    import sqlite3 as _sq
+    conn = _sq.connect(_db_path())
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='categories'"
+        ).fetchone()
+        if not row or "'transfer'" in row["sql"]:
+            return
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.executescript(
+            """
+            BEGIN;
+            CREATE TABLE categories_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              parent_id INTEGER REFERENCES categories_new(id) ON DELETE SET NULL,
+              kind TEXT NOT NULL CHECK (kind IN ('income', 'expense', 'transfer')),
+              UNIQUE (name, parent_id)
+            );
+            INSERT INTO categories_new (id, name, parent_id, kind)
+              SELECT id, name, parent_id, kind FROM categories;
+            DROP TABLE categories;
+            ALTER TABLE categories_new RENAME TO categories;
+            COMMIT;
+            """
+        )
+        conn.execute("PRAGMA foreign_keys = ON")
+    finally:
+        conn.close()
+
+
+def _ensure_transfer_category() -> None:
+    with connect() as conn:
+        exists = conn.execute(
+            "SELECT id FROM categories WHERE name = ? AND parent_id IS NULL",
+            ("Interné presuny / FX",),
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                "INSERT INTO categories (name, parent_id, kind) VALUES (?, NULL, 'transfer')",
+                ("Interné presuny / FX",),
+            )
+
+
+def _seed_categories_if_empty() -> None:
+    with connect() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
+        if count:
+            return
+        for name, kind, children in SEED_CATEGORIES:
+            cur = conn.execute(
+                "INSERT INTO categories (name, parent_id, kind) VALUES (?, NULL, ?)",
+                (name, kind),
+            )
+            parent_id = cur.lastrowid
+            for child in children:
+                conn.execute(
+                    "INSERT INTO categories (name, parent_id, kind) VALUES (?, ?, ?)",
+                    (child, parent_id, kind),
+                )
 
 
 def save_session_and_accounts(session_payload: dict) -> list[int]:
@@ -142,21 +260,27 @@ def get_account(account_id: int) -> sqlite3.Row | None:
 def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int, int]:
     inserted = updated = 0
     with connect() as conn:
+        rules = _load_rules(conn)
         for t in transactions:
             ref = t.get("entry_reference") or _synth_ref(t)
             amt = t.get("transaction_amount") or {}
             cp = (t.get("creditor") or {}).get("name") or (t.get("debtor") or {}).get("name")
             info = (t.get("remittance_information") or [None])[0]
-            row = conn.execute(
-                "SELECT 1 FROM transactions WHERE account_id = ? AND entry_reference = ?",
+            existing = conn.execute(
+                "SELECT category_id, manual_override FROM transactions "
+                "WHERE account_id = ? AND entry_reference = ?",
                 (account_id, ref),
             ).fetchone()
+            if existing and existing["manual_override"]:
+                category_id = existing["category_id"]
+            else:
+                category_id = _match_rules(rules, cp, info)
             conn.execute(
                 """INSERT OR REPLACE INTO transactions
                    (account_id, entry_reference, booking_date, amount, currency,
                     credit_debit, counterparty_name, remittance_info, status,
-                    raw_json, synced_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                    raw_json, synced_at, category_id, manual_override)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)""",
                 (
                     account_id,
                     ref,
@@ -168,13 +292,159 @@ def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int,
                     info,
                     t.get("status"),
                     json.dumps(t, ensure_ascii=False),
+                    category_id,
+                    1 if (existing and existing["manual_override"]) else 0,
                 ),
             )
-            if row:
+            if existing:
                 updated += 1
             else:
                 inserted += 1
     return inserted, updated
+
+
+def _load_rules(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, category_id, pattern, field FROM category_rules "
+        "ORDER BY priority ASC, id ASC"
+    ).fetchall()
+
+
+def _match_rules(rules, counterparty: str | None, remittance: str | None) -> int | None:
+    for r in rules:
+        haystack = ""
+        if r["field"] == "counterparty":
+            haystack = counterparty or ""
+        elif r["field"] == "remittance":
+            haystack = remittance or ""
+        else:
+            haystack = f"{counterparty or ''} {remittance or ''}"
+        try:
+            if re.search(r["pattern"], haystack, re.IGNORECASE):
+                return r["category_id"]
+        except re.error:
+            continue
+    return None
+
+
+def recategorize_all() -> tuple[int, int]:
+    """Re-run rules on all non-manually-overridden transactions. Returns (changed, skipped)."""
+    changed = skipped = 0
+    with connect() as conn:
+        rules = _load_rules(conn)
+        for t in conn.execute(
+            "SELECT account_id, entry_reference, counterparty_name, remittance_info, "
+            "category_id, manual_override FROM transactions"
+        ).fetchall():
+            if t["manual_override"]:
+                skipped += 1
+                continue
+            new_cat = _match_rules(rules, t["counterparty_name"], t["remittance_info"])
+            if new_cat != t["category_id"]:
+                conn.execute(
+                    "UPDATE transactions SET category_id = ? "
+                    "WHERE account_id = ? AND entry_reference = ?",
+                    (new_cat, t["account_id"], t["entry_reference"]),
+                )
+                changed += 1
+    return changed, skipped
+
+
+def add_rule(category_id: int, pattern: str, field: str = "any", priority: int = 100) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO category_rules (category_id, pattern, field, priority) "
+            "VALUES (?, ?, ?, ?)",
+            (category_id, pattern, field, priority),
+        )
+        return cur.lastrowid
+
+
+def list_rules() -> list[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT r.id, r.pattern, r.field, r.priority, r.category_id, c.name AS category_name "
+            "FROM category_rules r LEFT JOIN categories c ON c.id = r.category_id "
+            "ORDER BY r.priority, r.id"
+        ).fetchall()
+
+
+def delete_rule(rule_id: int) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM category_rules WHERE id = ?", (rule_id,))
+
+
+def generate_rules_from_manual() -> int:
+    """For each counterparty that was manually assigned to exactly one category,
+    create an exact-match rule on counterparty. Skip if such rule already exists."""
+    added = 0
+    with connect() as conn:
+        existing = {
+            (r["pattern"], r["field"], r["category_id"])
+            for r in conn.execute(
+                "SELECT pattern, field, category_id FROM category_rules"
+            )
+        }
+        rows = conn.execute(
+            """SELECT counterparty_name, category_id, COUNT(DISTINCT category_id) AS cats
+               FROM transactions
+               WHERE manual_override = 1
+                 AND counterparty_name IS NOT NULL AND counterparty_name != ''
+                 AND category_id IS NOT NULL
+               GROUP BY counterparty_name
+               HAVING cats = 1"""
+        ).fetchall()
+        for r in rows:
+            pattern = "^" + re.escape(r["counterparty_name"]) + "$"
+            key = (pattern, "counterparty", r["category_id"])
+            if key in existing:
+                continue
+            conn.execute(
+                "INSERT INTO category_rules (category_id, pattern, field, priority) "
+                "VALUES (?, ?, 'counterparty', 100)",
+                (r["category_id"], pattern),
+            )
+            added += 1
+
+        rem_rows = conn.execute(
+            """SELECT remittance_info, category_id, COUNT(DISTINCT category_id) AS cats
+               FROM transactions
+               WHERE manual_override = 1
+                 AND (counterparty_name IS NULL OR counterparty_name = '')
+                 AND remittance_info IS NOT NULL AND remittance_info != ''
+                 AND category_id IS NOT NULL
+               GROUP BY remittance_info
+               HAVING cats = 1"""
+        ).fetchall()
+        for r in rem_rows:
+            pattern = "^" + re.escape(r["remittance_info"]) + "$"
+            key = (pattern, "remittance", r["category_id"])
+            if key in existing:
+                continue
+            conn.execute(
+                "INSERT INTO category_rules (category_id, pattern, field, priority) "
+                "VALUES (?, ?, 'remittance', 100)",
+                (r["category_id"], pattern),
+            )
+            added += 1
+    return added
+
+
+def summary_by_category() -> list[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            """SELECT
+                 COALESCE(c.name, '(nezaradené)') AS category_name,
+                 COALESCE(c.kind, '') AS kind,
+                 t.currency,
+                 t.credit_debit,
+                 ROUND(SUM(CAST(t.amount AS REAL)), 2) AS total,
+                 COUNT(*) AS cnt
+               FROM transactions t
+               LEFT JOIN categories c ON c.id = t.category_id
+               GROUP BY t.category_id, t.currency, t.credit_debit
+               ORDER BY c.kind DESC, category_name, t.currency"""
+        ).fetchall()
 
 
 def _synth_ref(t: dict) -> str:
@@ -190,12 +460,38 @@ def list_accounts() -> list[sqlite3.Row]:
         ).fetchall()
 
 
-def list_transactions(account_id: int, limit: int = 200) -> list[sqlite3.Row]:
+def list_categories() -> list[sqlite3.Row]:
     with connect() as conn:
         return conn.execute(
-            """SELECT * FROM transactions
-               WHERE account_id = ?
-               ORDER BY booking_date DESC, entry_reference DESC
+            "SELECT id, name, parent_id, kind FROM categories "
+            "ORDER BY kind DESC, COALESCE(parent_id, id), id"
+        ).fetchall()
+
+
+def list_transactions(
+    account_id: int, limit: int = 500, only_uncategorized: bool = False
+) -> list[sqlite3.Row]:
+    where = "t.account_id = ?"
+    if only_uncategorized:
+        where += " AND t.category_id IS NULL"
+    with connect() as conn:
+        return conn.execute(
+            f"""SELECT t.*, c.name AS category_name
+               FROM transactions t
+               LEFT JOIN categories c ON c.id = t.category_id
+               WHERE {where}
+               ORDER BY t.booking_date DESC, t.entry_reference DESC
                LIMIT ?""",
             (account_id, limit),
         ).fetchall()
+
+
+def set_transaction_category(
+    account_id: int, entry_reference: str, category_id: int | None, manual: bool = True
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE transactions SET category_id = ?, manual_override = ? "
+            "WHERE account_id = ? AND entry_reference = ?",
+            (category_id, 1 if manual else 0, account_id, entry_reference),
+        )
