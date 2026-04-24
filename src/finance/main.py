@@ -5,13 +5,63 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from html import escape
 
 from finance import db
 from finance.providers.enablebanking import from_env as enablebanking_from_env
+
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+def _fmt(amount: float, currency: str = "", decimals: int = 0) -> str:
+    sign = "-" if amount < 0 else ""
+    s = f"{abs(amount):,.{decimals}f}".replace(",", " ")
+    return f"{sign}{s}{(' ' + currency) if currency else ''}"
+
+
+def _sidebar_context() -> dict:
+    """Build the sidebar category-totals + sync-status block, primary currency CZK."""
+    rows = db.summary_by_category()
+    income = {}
+    expense = {}
+    income_total = 0.0
+    expense_total = 0.0
+    for r in rows:
+        if r["currency"] != "CZK":
+            continue
+        if r["kind"] == "income":
+            bucket = income.setdefault(r["category_name"], 0.0)
+            income[r["category_name"]] = bucket + (float(r["total"]) if r["credit_debit"] == "CRDT" else 0.0)
+            income_total += float(r["total"]) if r["credit_debit"] == "CRDT" else 0.0
+        elif r["kind"] == "expense":
+            bucket = expense.setdefault(r["category_name"], 0.0)
+            expense[r["category_name"]] = bucket + (float(r["total"]) if r["credit_debit"] == "DBIT" else 0.0)
+            expense_total += float(r["total"]) if r["credit_debit"] == "DBIT" else 0.0
+
+    cats = db.list_categories()
+    income_cats = [
+        {"id": c["id"], "name": c["name"], "amt": _fmt(income.get(c["name"], 0.0), "CZK") if income.get(c["name"]) else None}
+        for c in cats if c["kind"] == "income" and c["parent_id"] is None
+    ]
+    expense_cats = [
+        {"id": c["id"], "name": c["name"], "amt": _fmt(expense.get(c["name"], 0.0), "CZK") if expense.get(c["name"]) else None}
+        for c in cats if c["kind"] == "expense" and c["parent_id"] is None
+    ]
+    accounts = db.list_accounts()
+    return {
+        "sidebar_income": income_cats,
+        "sidebar_expense": expense_cats,
+        "sidebar_income_total": _fmt(income_total, "CZK") if income_total else None,
+        "sidebar_expense_total": _fmt(expense_total, "CZK") if expense_total else None,
+        "accounts_count": len(accounts),
+        "sync_status": "sync: pri requeste",
+    }
 
 load_dotenv()
 
@@ -40,53 +90,86 @@ def healthz() -> dict[str, str]:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index() -> str:
+def index(request: Request):
     accounts = db.list_accounts()
-    rows = ["<h1>Finance dashboard</h1>"]
-    rows.append('<p><a href="/connect/Revolut/LT">+ Connect Revolut</a></p>')
-    rows.append('<p><a href="/categories">Kategórie</a> · <a href="/rules">Rules</a> · <a href="/summary">Summary</a></p>')
-    rows.append('<p><small><a href="/connect/mock/SK">(sandbox: Mock ASPSP SK)</a></small></p>')
-    if not accounts:
-        rows.append("<p><em>No accounts yet.</em></p>")
-        return "\n".join(rows)
-    rows.append("<h2>Accounts</h2><ul>")
-    for a in accounts:
-        rows.append(
-            f'<li>{a["iban"]} ({a["currency"]}) — '
-            f'<a href="/accounts/{a["id"]}/tx">transactions</a> · '
-            f'<a href="/accounts/{a["id"]}/sync">sync now</a></li>'
-        )
-    rows.append("</ul>")
-    return "\n".join(rows)
+    income_total = expense_total = 0.0
+    tx_count = uncat_count = 0
+    with db.connect() as conn:
+        for r in conn.execute(
+            "SELECT t.credit_debit, t.amount, t.currency, t.category_id, c.kind "
+            "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
+            "WHERE t.currency = 'CZK'"
+        ):
+            tx_count += 1
+            if r["category_id"] is None:
+                uncat_count += 1
+            if r["kind"] == "transfer":
+                continue
+            try:
+                amt = float(r["amount"])
+            except (TypeError, ValueError):
+                continue
+            if r["credit_debit"] == "CRDT":
+                income_total += amt
+            else:
+                expense_total += amt
+
+    net = income_total - expense_total
+    kpi = {
+        "income": _fmt(income_total),
+        "income_currency": "CZK",
+        "expense": _fmt(expense_total),
+        "expense_currency": "CZK",
+        "net": ("+" if net >= 0 else "") + _fmt(net),
+        "net_currency": "CZK",
+        "count": str(tx_count),
+        "uncategorized": str(uncat_count),
+    }
+
+    recent = []
+    with db.connect() as conn:
+        for r in conn.execute(
+            "SELECT t.booking_date, t.counterparty_name, t.remittance_info, t.amount, "
+            "t.currency, t.credit_debit, c.name AS category_name "
+            "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
+            "ORDER BY t.booking_date DESC, t.entry_reference DESC LIMIT 10"
+        ):
+            recent.append(dict(r))
+
+    accounts_view = []
+    with db.connect() as conn:
+        for a in accounts:
+            cnt = conn.execute(
+                "SELECT COUNT(*) FROM transactions WHERE account_id = ?", (a["id"],)
+            ).fetchone()[0]
+            accounts_view.append({**dict(a), "tx_count": cnt})
+
+    ctx = {
+        "nav": "dashboard",
+        "kpi": kpi,
+        "recent_tx": recent,
+        "accounts": accounts_view,
+        **_sidebar_context(),
+    }
+    return templates.TemplateResponse(request, "dashboard.html", ctx)
 
 
 @app.get("/categories", response_class=HTMLResponse)
-def categories_view() -> str:
-    cats = db.list_categories()
+def categories_view(request: Request):
+    cats = [dict(c) for c in db.list_categories()]
     by_parent: dict[int | None, list] = {}
     for c in cats:
         by_parent.setdefault(c["parent_id"], []).append(c)
-
-    def render_list(kind: str) -> str:
-        roots = [c for c in by_parent.get(None, []) if c["kind"] == kind]
-        items = []
-        for r in roots:
-            children = by_parent.get(r["id"], [])
-            if children:
-                subs = "".join(f"<li>{c['name']}</li>" for c in children)
-                items.append(f"<li><strong>{r['name']}</strong><ul>{subs}</ul></li>")
-            else:
-                items.append(f"<li>{r['name']}</li>")
-        return f"<ul>{''.join(items)}</ul>"
-
-    return (
-        '<p><a href="/">← back</a></p>'
-        "<h1>Kategórie</h1>"
-        "<h2>Príjmy</h2>" + render_list("income") +
-        "<h2>Výdavky</h2>" + render_list("expense") +
-        "<h2>Presuny</h2>" + render_list("transfer") +
-        "<p><em>CRUD príde v kroku 2.4 — zatiaľ len read-only view zo seed dát.</em></p>"
-    )
+    roots = by_parent.get(None, [])
+    ctx = {
+        "nav": "categories",
+        "by_parent": by_parent,
+        "income_roots": [c for c in roots if c["kind"] == "income"],
+        "expense_roots": [c for c in roots if c["kind"] == "expense"],
+        "transfer_roots": [c for c in roots if c["kind"] == "transfer"],
+        **_sidebar_context(),
+    }
+    return templates.TemplateResponse(request, "categories.html", ctx)
 
 
 @app.get("/connect/mock/{country}")
@@ -133,6 +216,63 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
     return RedirectResponse(url="/", status_code=302)
 
 
+@app.get("/accounts", response_class=HTMLResponse)
+def accounts_view(request: Request):
+    accounts = []
+    with db.connect() as conn:
+        for a in db.list_accounts():
+            cnt = conn.execute(
+                "SELECT COUNT(*) FROM transactions WHERE account_id = ?", (a["id"],)
+            ).fetchone()[0]
+            uncat = conn.execute(
+                "SELECT COUNT(*) FROM transactions WHERE account_id = ? AND category_id IS NULL",
+                (a["id"],),
+            ).fetchone()[0]
+            accounts.append({**dict(a), "tx_count": cnt, "uncat": uncat})
+    ctx = {"nav": "accounts", "accounts": accounts, **_sidebar_context()}
+    return templates.TemplateResponse(request, "accounts.html", ctx)
+
+
+@app.get("/transactions", response_class=HTMLResponse)
+def transactions_all(
+    request: Request, uncat: int = 0, category: int | None = None, limit: int = 500
+):
+    where = ["1=1"]
+    args: list = []
+    if uncat:
+        where.append("t.category_id IS NULL")
+    if category:
+        where.append("t.category_id = ?")
+        args.append(category)
+    args.append(limit)
+    sql = (
+        "SELECT t.account_id, t.booking_date, t.counterparty_name, t.remittance_info, "
+        "t.amount, t.currency, t.credit_debit, t.category_id, t.manual_override, "
+        "c.name AS category_name, a.currency AS account_currency "
+        "FROM transactions t "
+        "LEFT JOIN categories c ON c.id = t.category_id "
+        "LEFT JOIN accounts a ON a.id = t.account_id "
+        f"WHERE {' AND '.join(where)} "
+        "ORDER BY t.booking_date DESC, t.entry_reference DESC LIMIT ?"
+    )
+    with db.connect() as conn:
+        txs = [dict(r) for r in conn.execute(sql, args).fetchall()]
+        filter_name = None
+        if category:
+            row = conn.execute("SELECT name FROM categories WHERE id = ?", (category,)).fetchone()
+            if row:
+                filter_name = row["name"]
+    ctx = {
+        "nav": "tx",
+        "txs": txs,
+        "uncat": uncat,
+        "category": category,
+        "filter_category_name": filter_name,
+        **_sidebar_context(),
+    }
+    return templates.TemplateResponse(request, "transactions_all.html", ctx)
+
+
 @app.get("/accounts/{account_id}/sync")
 def sync_account(account_id: int) -> RedirectResponse:
     acc = db.get_account(account_id)
@@ -159,95 +299,35 @@ def _category_select(cats, selected: int | None, name: str = "category_id") -> s
 
 @app.get("/accounts/{account_id}/tx", response_class=HTMLResponse)
 def show_transactions(
-    account_id: int, synced: str | None = None, uncat: int = 0
-) -> str:
+    request: Request, account_id: int, synced: str | None = None, uncat: int = 0
+):
+    account = db.get_account(account_id)
+    if not account:
+        raise HTTPException(404, "Account not found")
     txs = db.list_transactions(account_id, only_uncategorized=bool(uncat))
     cats = db.list_categories()
-    banner = f'<p><strong>Sync:</strong> {synced.replace("_", " ")}</p>' if synced else ""
-    toggle_label = "Zobraz všetky" if uncat else "Zobraz len nezaradené"
-    toggle_target = 0 if uncat else 1
-    rows = [
-        '<p><a href="/">← back</a></p>',
-        "<h1>Transactions</h1>",
-        banner,
-        f'<p>{len(txs)} shown · '
-        f'<a href="/accounts/{account_id}/tx?uncat={toggle_target}">{toggle_label}</a></p>',
-        '<table border=1 cellpadding=4><tr>'
-        "<th>Date</th><th>Amount</th><th>Currency</th><th>Dir</th>"
-        "<th>Counterparty</th><th>Info</th><th>Category</th></tr>",
-    ]
-    for t in txs:
-        ref = escape(t["entry_reference"])
-        manual_mark = " *" if t["manual_override"] else ""
-        select = _category_select(cats, t["category_id"])
-        form = (
-            f'<form method="post" action="/accounts/{account_id}/tx/{ref}/category" '
-            f'style="margin:0;display:flex;gap:4px">'
-            f'<input type="hidden" name="uncat" value="{uncat}">'
-            f'{select}<button type="submit">✓</button>{manual_mark}</form>'
-        )
-        rows.append(
-            f"<tr><td>{t['booking_date'] or ''}</td>"
-            f"<td align=right>{t['amount']}</td>"
-            f"<td>{t['currency']}</td>"
-            f"<td>{t['credit_debit'] or ''}</td>"
-            f"<td>{escape(t['counterparty_name'] or '')}</td>"
-            f"<td>{escape(t['remittance_info'] or '')}</td>"
-            f"<td>{form}</td></tr>"
-        )
-    rows.append("</table>")
-    rows.append('<p><small>* = manuálne nastavené (auto-rules to neprepíšu)</small></p>')
-    return "\n".join(rows)
+    ctx = {
+        "nav": "tx",
+        "account": dict(account),
+        "txs": [dict(t) for t in txs],
+        "cats": [dict(c) for c in cats],
+        "uncat": uncat,
+        "synced": synced,
+        **_sidebar_context(),
+    }
+    return templates.TemplateResponse(request, "transactions.html", ctx)
 
 
 @app.get("/rules", response_class=HTMLResponse)
-def rules_view(msg: str | None = None) -> str:
-    rules = db.list_rules()
-    cats = db.list_categories()
-    head = [
-        '<p><a href="/">← back</a></p>',
-        "<h1>Auto-categorization rules</h1>",
-    ]
-    if msg:
-        head.append(f"<p><strong>{escape(msg)}</strong></p>")
-    head.append(
-        '<form method="post" action="/rules/generate" style="display:inline">'
-        '<button type="submit">Generate rules from manual assignments</button></form> '
-        '<form method="post" action="/rules/apply" style="display:inline">'
-        '<button type="submit">Re-categorize all (respect manual)</button></form>'
-    )
-    head.append("<h2>Add rule</h2>")
-    head.append(
-        '<form method="post" action="/rules">'
-        f'{_category_select(cats, None)} '
-        '<select name="field">'
-        '<option value="counterparty">counterparty</option>'
-        '<option value="remittance">remittance</option>'
-        '<option value="any" selected>any</option>'
-        '</select> '
-        '<input name="pattern" placeholder="regex pattern" style="width:300px" required> '
-        '<input name="priority" type="number" value="100" style="width:60px"> '
-        '<button>Add</button></form>'
-    )
-    head.append("<h2>Existing rules</h2>")
-    if not rules:
-        head.append("<p><em>No rules yet.</em></p>")
-    else:
-        head.append(
-            "<table border=1 cellpadding=4><tr>"
-            "<th>Priority</th><th>Field</th><th>Pattern</th><th>Category</th><th></th></tr>"
-        )
-        for r in rules:
-            head.append(
-                f"<tr><td>{r['priority']}</td>"
-                f"<td>{r['field']}</td>"
-                f"<td><code>{escape(r['pattern'])}</code></td>"
-                f"<td>{escape(r['category_name'] or '?')}</td>"
-                f'<td><form method="post" action="/rules/{r["id"]}/delete" style="margin:0">'
-                f'<button type="submit">✕</button></form></td></tr>'
-            )
-        head.append("</table>")
-    return "\n".join(head)
+def rules_view(request: Request, msg: str | None = None):
+    ctx = {
+        "nav": "rules",
+        "rules": [dict(r) for r in db.list_rules()],
+        "cats": [dict(c) for c in db.list_categories()],
+        "msg": msg,
+        **_sidebar_context(),
+    }
+    return templates.TemplateResponse(request, "rules.html", ctx)
 
 
 @app.post("/rules")
@@ -284,7 +364,7 @@ def apply_rules_route() -> RedirectResponse:
 
 
 @app.get("/summary", response_class=HTMLResponse)
-def summary_view() -> str:
+def summary_view(request: Request):
     rows = db.summary_by_category()
     agg: dict[tuple[str, str, str], dict[str, float]] = {}
     for r in rows:
@@ -297,36 +377,26 @@ def summary_view() -> str:
             bucket["out"] += amt
         bucket["cnt"] += r["cnt"]
 
-    def render_section(title: str, items) -> str:
-        if not items:
-            return ""
-        out = [
-            f"<h2>{title}</h2>",
-            "<table border=1 cellpadding=4><tr>"
-            "<th>Category</th><th>Currency</th><th>In</th><th>Out</th><th>Net</th><th>Count</th></tr>",
-        ]
-        for (cat, cur), v in sorted(items):
-            net = v["in"] - v["out"]
-            out.append(
-                f"<tr><td>{escape(cat)}</td><td>{escape(cur)}</td>"
-                f"<td align=right>{v['in']:.2f}</td>"
-                f"<td align=right>{v['out']:.2f}</td>"
-                f"<td align=right><strong>{net:+.2f}</strong></td>"
-                f"<td align=right>{v['cnt']}</td></tr>"
-            )
-        out.append("</table>")
-        return "\n".join(out)
+    def to_items(want_transfer: bool):
+        out = []
+        for (kind, cat, cur), v in agg.items():
+            is_transfer = kind == "transfer"
+            if want_transfer != is_transfer:
+                continue
+            out.append({
+                "cat": cat, "cur": cur,
+                "in_": v["in"], "out": v["out"],
+                "net": v["in"] - v["out"], "cnt": v["cnt"],
+            })
+        return sorted(out, key=lambda x: (x["cat"], x["cur"]))
 
-    main_items = [((cat, cur), v) for (kind, cat, cur), v in agg.items() if kind != "transfer"]
-    transfer_items = [((cat, cur), v) for (kind, cat, cur), v in agg.items() if kind == "transfer"]
-
-    html = [
-        '<p><a href="/">← back</a></p>',
-        "<h1>Summary by category</h1>",
-        render_section("Príjmy / Výdavky", main_items),
-        render_section("Interné presuny (nerátajú sa do In/Out)", transfer_items),
-    ]
-    return "\n".join(html)
+    ctx = {
+        "nav": "summary",
+        "main_items": to_items(False),
+        "transfer_items": to_items(True),
+        **_sidebar_context(),
+    }
+    return templates.TemplateResponse(request, "summary.html", ctx)
 
 
 @app.post("/accounts/{account_id}/tx/{entry_ref:path}/category")

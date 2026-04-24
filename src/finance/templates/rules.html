@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Pravidlá{% endblock %}
+{% block heading %}Pravidlá auto-kategorizácie{% endblock %}
+
+{% block topbar_actions %}
+  <form class="inline" method="post" action="/rules/generate">
+    <button class="btn" type="submit">Generate from manual</button>
+  </form>
+  <form class="inline" method="post" action="/rules/apply">
+    <button class="btn btn-primary" type="submit">Re-categorize all</button>
+  </form>
+{% endblock %}
+
+{% block content %}
+  {% if msg %}
+    <div class="card" style="margin-bottom:14px; padding:10px 14px; border-color: var(--accent);">
+      <strong>{{ msg }}</strong>
+    </div>
+  {% endif %}
+
+  <h2 class="block-title">Pridať pravidlo</h2>
+  <div class="card" style="margin-bottom:24px;">
+    <form method="post" action="/rules" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <select name="category_id" required>
+        <option value="">— kategória —</option>
+        {% for c in cats %}
+          <option value="{{ c.id }}">{% if c.parent_id %}↳ {% endif %}{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <select name="field">
+        <option value="counterparty">counterparty</option>
+        <option value="remittance">remittance</option>
+        <option value="any" selected>any</option>
+      </select>
+      <input type="text" name="pattern" placeholder="regex pattern" style="flex:1; min-width:240px;" required>
+      <input type="number" name="priority" value="100" style="width:80px;">
+      <button class="btn btn-primary" type="submit">Pridať</button>
+    </form>
+  </div>
+
+  <h2 class="block-title">Existujúce pravidlá ({{ rules|length }})</h2>
+  <table class="data">
+    <tr>
+      <th class="num">Priorita</th>
+      <th>Field</th>
+      <th>Pattern</th>
+      <th>Kategória</th>
+      <th></th>
+    </tr>
+    {% for r in rules %}
+      <tr>
+        <td class="num mono">{{ r.priority }}</td>
+        <td><span style="font-size:11px; color:var(--ink-3); text-transform:uppercase;">{{ r.field }}</span></td>
+        <td><code style="font-size:12px; color: var(--accent);">{{ r.pattern }}</code></td>
+        <td>{{ r.category_name or '?' }}</td>
+        <td style="text-align:right;">
+          <form class="inline" method="post" action="/rules/{{ r.id }}/delete">
+            <button class="btn" type="submit" style="color: var(--neg);">✕</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not rules %}
+      <tr><td colspan="5" style="text-align:center; color:var(--ink-3); padding:24px;">Žiadne pravidlá</td></tr>
+    {% endif %}
+  </table>
+{% endblock %}

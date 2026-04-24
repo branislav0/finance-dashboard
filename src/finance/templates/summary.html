@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Reporty{% endblock %}
+{% block heading %}Reporty / Summary{% endblock %}
+
+{% macro section(title, items, neutral=False) %}
+  {% if items %}
+    <h2 class="block-title" style="margin-top:24px;">{{ title }}</h2>
+    <table class="data">
+      <tr>
+        <th>Kategória</th>
+        <th>Mena</th>
+        <th class="num">In</th>
+        <th class="num">Out</th>
+        <th class="num">Net</th>
+        <th class="num">Count</th>
+      </tr>
+      {% for it in items %}
+        <tr>
+          <td>{{ it.cat }}</td>
+          <td class="mono">{{ it.cur }}</td>
+          <td class="num mono tnum pos">{{ '%.2f'|format(it.in_) }}</td>
+          <td class="num mono tnum neg">{{ '%.2f'|format(it.out) }}</td>
+          <td class="num mono tnum"><strong>{{ '%+.2f'|format(it.net) }}</strong></td>
+          <td class="num mono tnum">{{ it.cnt }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+  {{ section('Príjmy / Výdavky', main_items) }}
+  {{ section('Interné presuny (nerátajú sa do In/Out)', transfer_items, neutral=True) }}
+  {% if not main_items and not transfer_items %}
+    <p style="color:var(--ink-3); text-align:center; padding:48px;">Žiadne dáta zatiaľ. Pripoj banku a synchronizuj.</p>
+  {% endif %}
+{% endblock %}

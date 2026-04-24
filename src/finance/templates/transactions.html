@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ account.name or account.iban }} — transakcie{% endblock %}
+{% block heading %}{{ account.name or account.iban }} <span style="font-size:13px; color:var(--ink-3); font-weight:400; margin-left:8px;">{{ account.currency }} · {{ account.iban }}</span>{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn" href="/accounts/{{ account.id }}/sync">↻ Sync</a>
+  <a class="btn{% if uncat %} btn-primary{% endif %}" href="/accounts/{{ account.id }}/tx?uncat={% if uncat %}0{% else %}1{% endif %}">
+    {% if uncat %}Všetky{% else %}Len nezaradené{% endif %}
+  </a>
+{% endblock %}
+
+{% block content %}
+  {% if synced %}
+    <div class="card" style="margin-bottom:14px; border-color: var(--pos); background: var(--pos-soft);">
+      <strong style="color: var(--pos);">Sync:</strong> {{ synced.replace('_', ' ') }}
+    </div>
+  {% endif %}
+
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+    <h2 class="block-title">{{ txs|length }} {% if uncat %}nezaradených{% else %}transakcií{% endif %}</h2>
+    <span style="font-size:11px; color:var(--ink-3);">* = manuálne nastavené (rules to neprepíšu)</span>
+  </div>
+
+  <table class="data">
+    <tr>
+      <th>Dátum</th>
+      <th>Counterparty</th>
+      <th>Info</th>
+      <th class="num">Suma</th>
+      <th>Kategória</th>
+    </tr>
+    {% for t in txs %}
+      <tr>
+        <td class="mono" style="white-space:nowrap;">{{ t.booking_date or '—' }}</td>
+        <td>{{ t.counterparty_name or '—' }}</td>
+        <td style="color:var(--ink-3); font-size:12px;">{{ t.remittance_info or '' }}</td>
+        <td class="num mono tnum {% if t.credit_debit == 'CRDT' %}pos{% else %}neg{% endif %}" style="white-space:nowrap;">
+          {% if t.credit_debit == 'CRDT' %}+{% else %}-{% endif %}{{ t.amount }} {{ t.currency }}
+        </td>
+        <td>
+          <form class="inline" method="post" action="/accounts/{{ account.id }}/tx/{{ t.entry_reference }}/category">
+            <input type="hidden" name="uncat" value="{{ uncat }}">
+            <select name="category_id">
+              <option value="">—</option>
+              {% for c in cats %}
+                <option value="{{ c.id }}" {% if t.category_id == c.id %}selected{% endif %}>
+                  {% if c.parent_id %}↳ {% endif %}{{ c.name }}
+                </option>
+              {% endfor %}
+            </select>
+            <button class="btn" type="submit">✓</button>
+            {% if t.manual_override %}<span style="color:var(--accent); font-weight:600;">*</span>{% endif %}
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not txs %}
+      <tr><td colspan="5" style="text-align:center; color:var(--ink-3); padding:24px;">Žiadne transakcie</td></tr>
+    {% endif %}
+  </table>
+{% endblock %}
