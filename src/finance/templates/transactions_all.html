@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Transakcie{% endblock %}
+{% block heading %}Všetky transakcie{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn{% if uncat %} btn-primary{% endif %}" href="/transactions?uncat={% if uncat %}0{% else %}1{% endif %}{% if category %}&category={{ category }}{% endif %}">
+    {% if uncat %}Všetky{% else %}Len nezaradené{% endif %}
+  </a>
+  {% if category %}
+    <a class="btn" href="/transactions?uncat={{ uncat }}">✕ Zruš filter</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+    <h2 class="block-title">
+      {{ txs|length }} transakcií
+      {% if filter_category_name %}<span style="color:var(--accent); margin-left:8px;">· kategória: {{ filter_category_name }}</span>{% endif %}
+    </h2>
+  </div>
+
+  <table class="data">
+    <tr>
+      <th>Dátum</th>
+      <th>Účet</th>
+      <th>Counterparty</th>
+      <th>Info</th>
+      <th class="num">Suma</th>
+      <th>Kategória</th>
+    </tr>
+    {% for t in txs %}
+      <tr>
+        <td class="mono" style="white-space:nowrap;">{{ t.booking_date or '—' }}</td>
+        <td><a href="/accounts/{{ t.account_id }}/tx" style="font-size:11px; color:var(--ink-3);">{{ t.account_currency }}</a></td>
+        <td>{{ t.counterparty_name or '—' }}</td>
+        <td style="color:var(--ink-3); font-size:12px;">{{ t.remittance_info or '' }}</td>
+        <td class="num mono tnum {% if t.credit_debit == 'CRDT' %}pos{% else %}neg{% endif %}" style="white-space:nowrap;">
+          {% if t.credit_debit == 'CRDT' %}+{% else %}-{% endif %}{{ t.amount }} {{ t.currency }}
+        </td>
+        <td style="font-size:12px;">{{ t.category_name or '' }}{% if t.manual_override %} <span style="color:var(--accent);">*</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    {% if not txs %}
+      <tr><td colspan="6" style="text-align:center; color:var(--ink-3); padding:24px;">Žiadne transakcie</td></tr>
+    {% endif %}
+  </table>
+  <p style="font-size:11px; color:var(--ink-3); margin-top:10px;">Zobrazených max 500. Pre úpravu kategórie klikni na účet.</p>
+{% endblock %}

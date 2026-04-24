@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Účty{% endblock %}
+{% block heading %}Účty{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn" href="/connect/Revolut/LT">+ Revolut</a>
+  <a class="btn" href="/connect/mock/SK">+ Mock SK</a>
+{% endblock %}
+
+{% block content %}
+  <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:14px;">
+    {% for a in accounts %}
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
+          <div style="min-width:0; flex:1;">
+            <div style="font-weight:600; font-size:14px;">{{ a.name or a.iban }}</div>
+            <div class="mono" style="font-size:11px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis;">{{ a.iban }}</div>
+          </div>
+          <span class="mono" style="font-size:11px; color:var(--ink-3); background:var(--bg-2); padding:2px 8px; border-radius:6px;">{{ a.currency }}</span>
+        </div>
+        <div style="display:flex; gap:14px; margin-top:14px; padding-top:12px; border-top:1px solid var(--line-2);">
+          <div>
+            <div style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em;">Tx</div>
+            <div class="mono tnum" style="font-size:18px; font-weight:600;">{{ a.tx_count }}</div>
+          </div>
+          <div>
+            <div style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em;">Nezaradené</div>
+            <div class="mono tnum" style="font-size:18px; font-weight:600; {% if a.uncat > 0 %}color:var(--neg);{% endif %}">{{ a.uncat }}</div>
+          </div>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:14px;">
+          <a class="btn" href="/accounts/{{ a.id }}/tx" style="flex:1; text-align:center;">Transakcie</a>
+          <a class="btn btn-primary" href="/accounts/{{ a.id }}/sync" style="flex:1; text-align:center;">↻ Sync</a>
+        </div>
+      </div>
+    {% endfor %}
+    {% if not accounts %}
+      <div class="card" style="grid-column: 1/-1; text-align:center; padding:48px; color:var(--ink-3);">
+        Žiadne účty. Pripoj banku tlačidlom hore.
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn" href="/connect/Revolut/LT">+ Revolut</a>
+  <a class="btn" href="/connect/mock/SK">+ Mock SK</a>
+{% endblock %}
+
+{% block content %}
+<div class="kpi-grid">
+  <div class="card">
+    <div class="label">Príjem</div>
+    <div class="value pos mono tnum">{{ kpi.income }}</div>
+    <div class="delta">{{ kpi.income_currency }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Výdaje</div>
+    <div class="value neg mono tnum">{{ kpi.expense }}</div>
+    <div class="delta">{{ kpi.expense_currency }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Net</div>
+    <div class="value mono tnum">{{ kpi.net }}</div>
+    <div class="delta">{{ kpi.net_currency }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Transakcie</div>
+    <div class="value mono tnum">{{ kpi.count }}</div>
+    <div class="delta">{{ kpi.uncategorized }} nezaradených</div>
+  </div>
+</div>
+
+<div class="split-grid">
+  <div>
+    <h2 class="block-title">Posledné transakcie</h2>
+    <table class="data">
+      <tr><th>Dátum</th><th>Counterparty</th><th>Kategória</th><th class="num">Suma</th></tr>
+      {% for t in recent_tx %}
+        <tr>
+          <td class="mono">{{ t.booking_date or '—' }}</td>
+          <td>{{ t.counterparty_name or t.remittance_info or '—' }}</td>
+          <td>{{ t.category_name or '<em style="color:var(--ink-3)">—</em>' | safe }}</td>
+          <td class="num mono tnum {% if t.credit_debit == 'CRDT' %}pos{% else %}neg{% endif %}">
+            {% if t.credit_debit == 'CRDT' %}+{% else %}-{% endif %}{{ t.amount }} {{ t.currency }}
+          </td>
+        </tr>
+      {% endfor %}
+      {% if not recent_tx %}
+        <tr><td colspan="4" style="color:var(--ink-3); text-align:center;">Žiadne transakcie</td></tr>
+      {% endif %}
+    </table>
+  </div>
+
+  <div>
+    <h2 class="block-title">Účty</h2>
+    <table class="data">
+      <tr><th>Banka / IBAN</th><th>Mena</th><th class="num">Tx</th></tr>
+      {% for a in accounts %}
+        <tr>
+          <td><a href="/accounts/{{ a.id }}/tx" style="color:var(--ink); font-weight:500;">{{ a.name or a.iban }}</a><br>
+              <span class="mono" style="font-size:11px; color:var(--ink-3);">{{ a.iban }}</span></td>
+          <td class="mono">{{ a.currency }}</td>
+          <td class="num mono tnum">{{ a.tx_count }}</td>
+        </tr>
+      {% endfor %}
+      {% if not accounts %}
+        <tr><td colspan="3" style="color:var(--ink-3); text-align:center;">Žiadne účty — pripoj banku tlačidlom hore.</td></tr>
+      {% endif %}
+    </table>
+  </div>
+</div>
+{% endblock %}
