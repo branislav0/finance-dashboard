@@ -12,8 +12,10 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from html import escape
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from finance import db
+from finance import auth
 from finance.providers.enablebanking import from_env as enablebanking_from_env
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -75,6 +77,58 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="finance-dashboard", lifespan=lifespan)
+
+
+PUBLIC_PATHS = {"/login", "/healthz", "/logout"}
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path in PUBLIC_PATHS:
+            return await call_next(request)
+        if not auth.password_hash_from_env():
+            return await call_next(request)
+        token = request.cookies.get(auth.SESSION_COOKIE_NAME, "")
+        if not auth.verify_session_token(token):
+            return RedirectResponse(url="/login", status_code=303)
+        return await call_next(request)
+
+
+app.add_middleware(AuthMiddleware)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request):
+    return templates.TemplateResponse(request, "login.html", {"error": None})
+
+
+@app.post("/login", response_model=None)
+def login_submit(request: Request, password: str = Form(...)):
+    stored = auth.password_hash_from_env()
+    if not stored or not auth.verify_password(password, stored):
+        return templates.TemplateResponse(
+            request, "login.html", {"error": "Nesprávne heslo."}, status_code=401
+        )
+    token = auth.create_session_token()
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.set_cookie(
+        key=auth.SESSION_COOKIE_NAME,
+        value=token,
+        max_age=auth.SESSION_LIFETIME_DAYS * 86400,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+    return resp
+
+
+@app.get("/logout")
+def logout() -> RedirectResponse:
+    resp = RedirectResponse(url="/login", status_code=303)
+    resp.delete_cookie(auth.SESSION_COOKIE_NAME, path="/")
+    return resp
 
 
 def _redirect_url(request: Request) -> str:
