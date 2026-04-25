@@ -32,8 +32,15 @@
       <tr>
         <td class="mono" style="white-space:nowrap;">{{ t.booking_date or '—' }}</td>
         <td><a href="/accounts/{{ t.account_id }}/tx" style="font-size:11px; color:var(--ink-3);">{{ t.account_currency }}</a></td>
-        <td>{{ t.counterparty_name or '—' }}</td>
-        <td style="color:var(--ink-3); font-size:12px;">{{ t.remittance_info or '' }}</td>
+        <td>
+          {% if t.counterparty_name %}{{ t.counterparty_name }}
+          {% elif t.tx_type %}<span style="color:var(--ink-3); font-style:italic;">{{ t.tx_type }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td style="color:var(--ink-3); font-size:12px;">
+          {{ t.remittance_info or '' }}
+          {% if t.note %}<div style="color:var(--accent);">📝 {{ t.note }}</div>{% endif %}
+        </td>
         <td class="num mono tnum {% if t.credit_debit == 'CRDT' %}pos{% else %}neg{% endif %}" style="white-space:nowrap;">
           {% if t.credit_debit == 'CRDT' %}+{% else %}-{% endif %}{{ t.amount }} {{ t.currency }}
         </td>
