@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Login · Moneyyy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: oklch(0.14 0.01 260);
+    --surface: oklch(0.19 0.014 260 / 0.7);
+    --ink: oklch(0.97 0.005 260);
+    --ink-3: oklch(0.62 0.012 260);
+    --line: oklch(0.26 0.015 260);
+    --accent: oklch(0.70 0.22 265);
+    --neg: oklch(0.72 0.18 28);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; color: var(--ink); font-family:'Geist', ui-sans-serif, system-ui, sans-serif; }
+  body {
+    min-height:100vh; display:grid; place-items:center;
+    background:
+      radial-gradient(1100px 700px at 70% 0%, oklch(0.26 0.04 280 / 0.55), transparent 60%),
+      radial-gradient(900px 600px at 20% 100%, oklch(0.22 0.05 300 / 0.45), transparent 65%),
+      linear-gradient(180deg, oklch(0.10 0.010 260) 0%, oklch(0.20 0.018 265) 100%);
+    background-attachment: fixed;
+  }
+  .card {
+    width: min(380px, 92vw);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 28px;
+    backdrop-filter: blur(8px);
+  }
+  h1 { margin:0 0 4px 0; font-size:22px; font-weight:600; }
+  .sub { color: var(--ink-3); font-size:13px; margin-bottom: 22px; }
+  label { display:block; font-size:11px; color: var(--ink-3); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; }
+  input[type=password] {
+    width:100%; padding:10px 12px; font-size:14px;
+    background: oklch(0.12 0.01 260); color: var(--ink);
+    border:1px solid var(--line); border-radius:8px; outline:none;
+    font-family: inherit;
+  }
+  input[type=password]:focus { border-color: var(--accent); }
+  button {
+    margin-top:16px; width:100%; padding:11px;
+    background: var(--accent); color: oklch(0.15 0.02 265);
+    border:0; border-radius:8px; font-weight:600; font-size:14px;
+    cursor:pointer; font-family:inherit;
+  }
+  button:hover { filter: brightness(1.08); }
+  .err { color: var(--neg); font-size:12px; margin-top:12px; }
+</style>
+</head>
+<body>
+  <form class="card" method="post" action="/login">
+    <h1>Moneyyy</h1>
+    <div class="sub">Zadaj heslo pre prístup k dashboardu</div>
+    <label for="pw">Heslo</label>
+    <input id="pw" type="password" name="password" autofocus required />
+    <button type="submit">Prihlásiť</button>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  </form>
+</body>
+</html>
