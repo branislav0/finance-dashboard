@@ -176,6 +176,22 @@
       {% block topbar_actions %}{% endblock %}
     </div>
     <div class="body">
+      {% if consent_warnings %}
+        {% for w in consent_warnings %}
+          <div class="card" style="margin-bottom:12px; border-color: var(--neg); background: oklch(0.22 0.05 28 / 0.4);">
+            <strong style="color: var(--neg);">
+              {% if w.expired %}⚠ Vypršala autorizácia{% else %}⏳ Autorizácia končí{% endif %}:
+            </strong>
+            {{ w.aspsp }} ({{ w.country }})
+            {% if w.expired %}
+              už {{ -w.days_left }} dní — sync nebude fungovať.
+            {% else %}
+              o {{ w.days_left }} dní ({{ w.valid_until }}).
+            {% endif %}
+            <a class="btn btn-primary" style="margin-left:10px;" href="/connect/{{ w.aspsp }}/{{ w.country }}">Obnoviť</a>
+          </div>
+        {% endfor %}
+      {% endif %}
       {% block content %}{% endblock %}
     </div>
   </main>
