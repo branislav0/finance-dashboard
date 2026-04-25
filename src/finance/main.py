@@ -445,3 +445,11 @@ def set_tx_category(
     return RedirectResponse(
         url=f"/accounts/{account_id}/tx?uncat={uncat}", status_code=303
     )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    host = os.getenv("FINANCE_HOST", "127.0.0.1")
+    port = int(os.getenv("FINANCE_PORT", "8000"))
+    uvicorn.run("finance.main:app", host=host, port=port, reload=False)
