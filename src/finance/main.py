@@ -315,6 +315,7 @@ def transactions_all(
     sql = (
         "SELECT t.account_id, t.booking_date, t.counterparty_name, t.remittance_info, "
         "t.amount, t.currency, t.credit_debit, t.category_id, t.manual_override, "
+        "t.tx_type, t.note, "
         "c.name AS category_name, a.currency AS account_currency "
         "FROM transactions t "
         "LEFT JOIN categories c ON c.id = t.category_id "
@@ -497,6 +498,19 @@ def set_tx_category(
 ) -> RedirectResponse:
     cat_id = int(category_id) if category_id else None
     db.set_transaction_category(account_id, entry_ref, cat_id, manual=True)
+    return RedirectResponse(
+        url=f"/accounts/{account_id}/tx?uncat={uncat}", status_code=303
+    )
+
+
+@app.post("/accounts/{account_id}/tx/{entry_ref:path}/note")
+def set_tx_note(
+    account_id: int,
+    entry_ref: str,
+    note: str = Form(""),
+    uncat: int = Form(0),
+) -> RedirectResponse:
+    db.set_transaction_note(account_id, entry_ref, note.strip() or None)
     return RedirectResponse(
         url=f"/accounts/{account_id}/tx?uncat={uncat}", status_code=303
     )

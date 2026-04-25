@@ -24,16 +24,28 @@
   <table class="data">
     <tr>
       <th>Dátum</th>
-      <th>Counterparty</th>
-      <th>Info</th>
+      <th>Counterparty / typ</th>
+      <th>Info / poznámka</th>
       <th class="num">Suma</th>
       <th>Kategória</th>
     </tr>
     {% for t in txs %}
       <tr>
         <td class="mono" style="white-space:nowrap;">{{ t.booking_date or '—' }}</td>
-        <td>{{ t.counterparty_name or '—' }}</td>
-        <td style="color:var(--ink-3); font-size:12px;">{{ t.remittance_info or '' }}</td>
+        <td>
+          {% if t.counterparty_name %}{{ t.counterparty_name }}
+          {% elif t.tx_type %}<span style="color:var(--ink-3); font-style:italic;">{{ t.tx_type }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td style="color:var(--ink-3); font-size:12px;">
+          {% if t.remittance_info %}<div>{{ t.remittance_info }}</div>{% endif %}
+          <form class="inline" method="post" action="/accounts/{{ account.id }}/tx/{{ t.entry_reference }}/note" style="margin-top:2px;">
+            <input type="hidden" name="uncat" value="{{ uncat }}">
+            <input type="text" name="note" value="{{ t.note or '' }}" placeholder="poznámka (Enter = uložiť)"
+                   onblur="if(this.value!==this.defaultValue)this.form.submit()"
+                   style="width:160px; font-size:11px; padding:3px 6px; background:var(--bg-2); color:var(--ink); border:1px solid var(--line-2); border-radius:4px;">
+          </form>
+        </td>
         <td class="num mono tnum {% if t.credit_debit == 'CRDT' %}pos{% else %}neg{% endif %}" style="white-space:nowrap;">
           {% if t.credit_debit == 'CRDT' %}+{% else %}-{% endif %}{{ t.amount }} {{ t.currency }}
         </td>

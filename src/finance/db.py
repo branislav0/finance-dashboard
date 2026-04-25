@@ -121,6 +121,10 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE transactions ADD COLUMN manual_override INTEGER NOT NULL DEFAULT 0"
             )
+        if "tx_type" not in cols:
+            conn.execute("ALTER TABLE transactions ADD COLUMN tx_type TEXT")
+        if "note" not in cols:
+            conn.execute("ALTER TABLE transactions ADD COLUMN note TEXT")
     _migrate_categories_allow_transfer()
     _seed_categories_if_empty()
     _ensure_transfer_category()
@@ -257,6 +261,28 @@ def get_account(account_id: int) -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
 
 
+_TX_TYPE_LABELS = {
+    "CCRD": "Kartová platba",
+    "RCDT": "Prijatý prevod",
+    "ICDT": "Odchádzajúci prevod",
+    "DDBT": "Inkaso",
+    "STDO": "Trvalý príkaz",
+    "MCRD": "Mobilná platba",
+    "ACMT": "Bankový poplatok",
+}
+
+
+def _bank_tx_label(t: dict) -> str | None:
+    btc = t.get("bank_transaction_code") or {}
+    code = btc.get("code")
+    if code in _TX_TYPE_LABELS:
+        return _TX_TYPE_LABELS[code]
+    desc = btc.get("description")
+    if desc == "PMNT":
+        return "Platba"
+    return desc
+
+
 def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int, int]:
     inserted = updated = 0
     with connect() as conn:
@@ -267,7 +293,7 @@ def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int,
             cp = (t.get("creditor") or {}).get("name") or (t.get("debtor") or {}).get("name")
             info = (t.get("remittance_information") or [None])[0]
             existing = conn.execute(
-                "SELECT category_id, manual_override FROM transactions "
+                "SELECT category_id, manual_override, note FROM transactions "
                 "WHERE account_id = ? AND entry_reference = ?",
                 (account_id, ref),
             ).fetchone()
@@ -275,12 +301,14 @@ def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int,
                 category_id = existing["category_id"]
             else:
                 category_id = _match_rules(rules, cp, info)
+            tx_type = _bank_tx_label(t)
+            preserved_note = existing["note"] if existing else None
             conn.execute(
                 """INSERT OR REPLACE INTO transactions
                    (account_id, entry_reference, booking_date, amount, currency,
                     credit_debit, counterparty_name, remittance_info, status,
-                    raw_json, synced_at, category_id, manual_override)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)""",
+                    raw_json, synced_at, category_id, manual_override, tx_type, note)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)""",
                 (
                     account_id,
                     ref,
@@ -294,6 +322,8 @@ def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int,
                     json.dumps(t, ensure_ascii=False),
                     category_id,
                     1 if (existing and existing["manual_override"]) else 0,
+                    tx_type,
+                    preserved_note,
                 ),
             )
             if existing:
@@ -524,4 +554,12 @@ def set_transaction_category(
             "UPDATE transactions SET category_id = ?, manual_override = ? "
             "WHERE account_id = ? AND entry_reference = ?",
             (category_id, 1 if manual else 0, account_id, entry_reference),
+        )
+
+
+def set_transaction_note(account_id: int, entry_reference: str, note: str | None) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE transactions SET note = ? WHERE account_id = ? AND entry_reference = ?",
+            (note, account_id, entry_reference),
         )
