@@ -57,6 +57,7 @@ def _sidebar_context() -> dict:
     ]
     accounts = db.list_accounts()
     return {
+        "consent_warnings": db.consent_status(warn_days=14),
         "sidebar_income": income_cats,
         "sidebar_expense": expense_cats,
         "sidebar_income_total": _fmt(income_total, "CZK") if income_total else None,

@@ -453,6 +453,36 @@ def _synth_ref(t: dict) -> str:
     return f"{t.get('booking_date', '')}:{amt.get('amount', '')}:{cp}"
 
 
+def consent_status(warn_days: int = 14) -> list[dict]:
+    """Return one entry per linked bank session — only those expiring within
+    `warn_days` or already expired. Each: {aspsp, country, valid_until,
+    days_left, expired}."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    out: list[dict] = []
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT aspsp_name, aspsp_country, access_valid_until "
+            "FROM sessions WHERE access_valid_until IS NOT NULL"
+        ).fetchall()
+    for r in rows:
+        try:
+            exp = datetime.fromisoformat(r["access_valid_until"].replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        days_left = (exp - now).total_seconds() / 86400
+        if days_left > warn_days:
+            continue
+        out.append({
+            "aspsp": r["aspsp_name"],
+            "country": r["aspsp_country"],
+            "valid_until": r["access_valid_until"][:10],
+            "days_left": int(days_left),
+            "expired": days_left < 0,
+        })
+    return out
+
+
 def list_accounts() -> list[sqlite3.Row]:
     with connect() as conn:
         return conn.execute(
