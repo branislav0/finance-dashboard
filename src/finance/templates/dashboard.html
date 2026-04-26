@@ -25,35 +25,30 @@
   Mesiac {{ month }}
 </div>
 
-{% for c in kpi.currencies %}
-  <div style="font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.06em; margin:14px 0 6px;">
-    {{ c.currency }}
-  </div>
-  <div class="kpi-grid">
-    <div class="card">
-      <div class="label">Príjem</div>
-      <div class="value pos mono tnum">{{ c.income }}</div>
-      <div class="delta">{{ c.currency }}</div>
+<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:10px;">
+  {% for c in kpi.currencies %}
+    <div class="card" style="padding:12px 14px;">
+      <div class="label" style="margin-bottom:6px;">{{ c.currency }}</div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
+        <div>
+          <div style="font-size:10px; color:var(--ink-3);">Príjem</div>
+          <div class="pos mono tnum" style="font-size:15px; font-weight:600;">{{ c.income }}</div>
+        </div>
+        <div>
+          <div style="font-size:10px; color:var(--ink-3);">Výdaje</div>
+          <div class="neg mono tnum" style="font-size:15px; font-weight:600;">{{ c.expense }}</div>
+        </div>
+        <div>
+          <div style="font-size:10px; color:var(--ink-3);">Net</div>
+          <div class="mono tnum {% if c.net_pos %}pos{% else %}neg{% endif %}" style="font-size:15px; font-weight:600;">{{ c.net }}</div>
+        </div>
+      </div>
     </div>
-    <div class="card">
-      <div class="label">Výdaje</div>
-      <div class="value neg mono tnum">{{ c.expense }}</div>
-      <div class="delta">{{ c.currency }}</div>
-    </div>
-    <div class="card">
-      <div class="label">Net</div>
-      <div class="value mono tnum {% if c.net_pos %}pos{% else %}neg{% endif %}">{{ c.net }}</div>
-      <div class="delta">{{ c.currency }}</div>
-    </div>
-    <div class="card" style="opacity:0.6;"></div>
-  </div>
-{% endfor %}
-
-<div class="kpi-grid" style="margin-top:14px;">
-  <div class="card">
-    <div class="label">Transakcie tento mesiac</div>
-    <div class="value mono tnum">{{ kpi.count }}</div>
-    <div class="delta">{{ kpi.uncategorized }} nezaradených</div>
+  {% endfor %}
+  <div class="card" style="padding:12px 14px;">
+    <div class="label" style="margin-bottom:6px;">Transakcie</div>
+    <div class="mono tnum" style="font-size:18px; font-weight:600;">{{ kpi.count }}</div>
+    <div style="font-size:11px; color:var(--ink-3);">{{ kpi.uncategorized }} nezaradených</div>
   </div>
 </div>
 
