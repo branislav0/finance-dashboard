@@ -528,6 +528,37 @@ def list_categories() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def add_category(name: str, kind: str, parent_id: int | None = None) -> int:
+    if kind not in ("income", "expense", "transfer"):
+        raise ValueError(f"invalid kind: {kind}")
+    name = name.strip()
+    if not name:
+        raise ValueError("name required")
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO categories (name, parent_id, kind) VALUES (?, ?, ?)",
+            (name, parent_id, kind),
+        )
+        return cur.lastrowid
+
+
+def rename_category(category_id: int, new_name: str) -> None:
+    new_name = new_name.strip()
+    if not new_name:
+        raise ValueError("name required")
+    with connect() as conn:
+        conn.execute("UPDATE categories SET name = ? WHERE id = ?", (new_name, category_id))
+
+
+def delete_category(category_id: int) -> None:
+    """Delete category. Children become roots; transactions/rules unset (FK ON DELETE SET NULL)."""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE categories SET parent_id = NULL WHERE parent_id = ?", (category_id,)
+        )
+        conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+
+
 def list_transactions(
     account_id: int, limit: int = 500, only_uncategorized: bool = False
 ) -> list[sqlite3.Row]:

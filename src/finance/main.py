@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
@@ -244,6 +245,35 @@ def categories_view(request: Request):
         **_sidebar_context(),
     }
     return templates.TemplateResponse(request, "categories.html", ctx)
+
+
+@app.post("/categories/add")
+def categories_add(
+    name: str = Form(...),
+    kind: str = Form(...),
+    parent_id: str = Form(""),
+) -> RedirectResponse:
+    pid = int(parent_id) if parent_id else None
+    try:
+        db.add_category(name, kind, pid)
+    except (ValueError, sqlite3.IntegrityError):
+        return RedirectResponse(url="/categories?err=add", status_code=303)
+    return RedirectResponse(url="/categories", status_code=303)
+
+
+@app.post("/categories/{category_id}/rename")
+def categories_rename(category_id: int, name: str = Form(...)) -> RedirectResponse:
+    try:
+        db.rename_category(category_id, name)
+    except (ValueError, sqlite3.IntegrityError):
+        return RedirectResponse(url="/categories?err=rename", status_code=303)
+    return RedirectResponse(url="/categories", status_code=303)
+
+
+@app.post("/categories/{category_id}/delete")
+def categories_delete(category_id: int) -> RedirectResponse:
+    db.delete_category(category_id)
+    return RedirectResponse(url="/categories", status_code=303)
 
 
 @app.get("/connect/mock/{country}")

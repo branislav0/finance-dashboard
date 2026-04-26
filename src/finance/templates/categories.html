@@ -2,33 +2,68 @@
 {% block title %}Kategórie{% endblock %}
 {% block heading %}Kategórie{% endblock %}
 
-{% macro render_list(roots, by_parent) %}
-  <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:8px;">
+{% macro render_list(roots, by_parent, kind) %}
+  <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap:8px;">
     {% for r in roots %}
       <div class="card" style="padding:12px 14px;">
-        <div style="font-weight:600; font-size:13px; margin-bottom:4px;">{{ r.name }}</div>
+        <form class="inline" method="post" action="/categories/{{ r.id }}/rename" style="width:100%;">
+          <input type="text" name="name" value="{{ r.name }}" style="flex:1; font-weight:600; font-size:13px;">
+          <button class="btn" type="submit" title="Premenovať">✎</button>
+        </form>
+        <form class="inline" method="post" action="/categories/{{ r.id }}/delete" style="margin-top:4px;"
+              onsubmit="return confirm('Zmazať kategóriu {{ r.name }}? Transakcie sa stanú nezaradenými.');">
+          <button class="btn" type="submit" style="color:var(--neg);">✕ Zmazať</button>
+        </form>
         {% set children = by_parent.get(r.id, []) %}
         {% if children %}
-          <ul style="margin:6px 0 0; padding-left:16px; font-size:12px; color:var(--ink-3);">
-            {% for c in children %}<li>{{ c.name }}</li>{% endfor %}
+          <ul style="margin:8px 0 0; padding-left:14px; font-size:12px; color:var(--ink-3); list-style:none;">
+            {% for c in children %}
+              <li style="margin:3px 0; display:flex; gap:4px; align-items:center;">
+                <form class="inline" method="post" action="/categories/{{ c.id }}/rename">
+                  <input type="text" name="name" value="{{ c.name }}" style="font-size:11px; padding:2px 6px;">
+                  <button class="btn" type="submit" style="font-size:10px; padding:2px 6px;">✎</button>
+                </form>
+                <form class="inline" method="post" action="/categories/{{ c.id }}/delete"
+                      onsubmit="return confirm('Zmazať {{ c.name }}?');">
+                  <button class="btn" type="submit" style="color:var(--neg); font-size:10px; padding:2px 6px;">✕</button>
+                </form>
+              </li>
+            {% endfor %}
           </ul>
         {% endif %}
+        <form class="inline" method="post" action="/categories/add" style="margin-top:6px;">
+          <input type="hidden" name="kind" value="{{ kind }}">
+          <input type="hidden" name="parent_id" value="{{ r.id }}">
+          <input type="text" name="name" placeholder="+ podkategória" style="font-size:11px; padding:2px 6px; flex:1;">
+          <button class="btn" type="submit" style="font-size:10px; padding:2px 6px;">+</button>
+        </form>
       </div>
     {% endfor %}
   </div>
 {% endmacro %}
 
+{% macro add_root_form(kind, label) %}
+  <form class="inline" method="post" action="/categories/add" style="margin-top:8px;">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="text" name="name" placeholder="+ nová {{ label }}" style="min-width:200px;">
+    <button class="btn btn-primary" type="submit">Pridať</button>
+  </form>
+{% endmacro %}
+
 {% block content %}
   <h2 class="block-title pos">Príjmy</h2>
-  {{ render_list(income_roots, by_parent) }}
+  {{ render_list(income_roots, by_parent, 'income') }}
+  {{ add_root_form('income', 'kategória príjmu') }}
 
   <h2 class="block-title neg" style="margin-top:24px;">Výdavky</h2>
-  {{ render_list(expense_roots, by_parent) }}
+  {{ render_list(expense_roots, by_parent, 'expense') }}
+  {{ add_root_form('expense', 'kategória výdaja') }}
 
   <h2 class="block-title" style="margin-top:24px; color: var(--accent);">Presuny</h2>
-  {{ render_list(transfer_roots, by_parent) }}
+  {{ render_list(transfer_roots, by_parent, 'transfer') }}
+  {{ add_root_form('transfer', 'kategória presunu') }}
 
   <p style="color:var(--ink-3); font-size:12px; margin-top:24px;">
-    Read-only view zo seed dát. CRUD príde v ďalšej iterácii.
+    Pri zmazaní: transakcie sa stanú nezaradenými, podkategórie sa stanú root kategóriami, pravidlá sa zmažú.
   </p>
 {% endblock %}
