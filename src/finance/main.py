@@ -150,13 +150,13 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
     today = date.today()
     if not month:
         month = today.strftime("%Y-%m")
-    income_total = expense_total = 0.0
+    per_ccy: dict[str, dict] = {}
     tx_count = uncat_count = 0
     with db.connect() as conn:
         for r in conn.execute(
-            "SELECT t.credit_debit, t.amount, t.category_id, c.kind "
+            "SELECT t.credit_debit, t.amount, t.currency, t.category_id, c.kind "
             "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
-            "WHERE t.currency = 'CZK' AND substr(t.booking_date, 1, 7) = ?",
+            "WHERE substr(t.booking_date, 1, 7) = ?",
             (month,),
         ):
             tx_count += 1
@@ -168,19 +168,26 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
                 amt = float(r["amount"])
             except (TypeError, ValueError):
                 continue
+            ccy = r["currency"] or "?"
+            bucket = per_ccy.setdefault(ccy, {"income": 0.0, "expense": 0.0})
             if r["credit_debit"] == "CRDT":
-                income_total += amt
+                bucket["income"] += amt
             else:
-                expense_total += amt
+                bucket["expense"] += amt
 
-    net = income_total - expense_total
+    kpi_currencies = []
+    for ccy in sorted(per_ccy.keys()):
+        b = per_ccy[ccy]
+        net = b["income"] - b["expense"]
+        kpi_currencies.append({
+            "currency": ccy,
+            "income": _fmt(b["income"]),
+            "expense": _fmt(b["expense"]),
+            "net": ("+" if net >= 0 else "") + _fmt(net),
+            "net_pos": net >= 0,
+        })
     kpi = {
-        "income": _fmt(income_total),
-        "income_currency": "CZK",
-        "expense": _fmt(expense_total),
-        "expense_currency": "CZK",
-        "net": ("+" if net >= 0 else "") + _fmt(net),
-        "net_currency": "CZK",
+        "currencies": kpi_currencies,
         "count": str(tx_count),
         "uncategorized": str(uncat_count),
     }
