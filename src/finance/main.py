@@ -302,7 +302,15 @@ def accounts_view(request: Request):
 
 @app.get("/transactions", response_class=HTMLResponse)
 def transactions_all(
-    request: Request, uncat: int = 0, category: int | None = None, limit: int = 500
+    request: Request,
+    uncat: int = 0,
+    category: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    amount_min: str | None = None,
+    amount_max: str | None = None,
+    q: str | None = None,
+    limit: int = 500,
 ):
     where = ["1=1"]
     args: list = []
@@ -311,6 +319,22 @@ def transactions_all(
     if category:
         where.append("t.category_id = ?")
         args.append(category)
+    if date_from:
+        where.append("t.booking_date >= ?")
+        args.append(date_from)
+    if date_to:
+        where.append("t.booking_date <= ?")
+        args.append(date_to)
+    if amount_min:
+        where.append("CAST(t.amount AS REAL) >= ?")
+        args.append(float(amount_min))
+    if amount_max:
+        where.append("CAST(t.amount AS REAL) <= ?")
+        args.append(float(amount_max))
+    if q:
+        where.append("(t.counterparty_name LIKE ? OR t.remittance_info LIKE ? OR t.note LIKE ?)")
+        like = f"%{q}%"
+        args.extend([like, like, like])
     args.append(limit)
     sql = (
         "SELECT t.account_id, t.booking_date, t.counterparty_name, t.remittance_info, "
@@ -336,6 +360,11 @@ def transactions_all(
         "uncat": uncat,
         "category": category,
         "filter_category_name": filter_name,
+        "date_from": date_from or "",
+        "date_to": date_to or "",
+        "amount_min": amount_min or "",
+        "amount_max": amount_max or "",
+        "q": q or "",
         **_sidebar_context(),
     }
     return templates.TemplateResponse(request, "transactions_all.html", ctx)
