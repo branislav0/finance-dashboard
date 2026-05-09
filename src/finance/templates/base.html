@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{% block title %}Finance Dashboard{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23111827'/%3E%3Ctext x='50' y='68' font-family='system-ui,sans-serif' font-size='62' font-weight='700' text-anchor='middle' fill='%23a78bfa'%3EM%3C/text%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -106,7 +107,38 @@
 
   .split-grid { display:grid; grid-template-columns:minmax(0, 1.35fr) minmax(0, 1fr); gap:18px; align-items:start; }
   @media (max-width:1100px) { .split-grid { grid-template-columns: 1fr; } }
-  @media (max-width:820px) { aside.sidebar { display:none; } }
+  @media (max-width:820px) {
+    aside.sidebar { display:none; }
+    .topbar { padding:14px 14px 12px; flex-wrap:wrap; gap:8px; }
+    .topbar h1 { font-size:18px; }
+    .topbar .btn { font-size:13px; padding:7px 12px; }
+    .body { padding:14px 14px 40px; }
+    table.data { width:100%; table-layout:auto; }
+    table.data th { padding:8px 6px; font-size:11px; }
+    table.data td { padding:10px 6px; font-size:13px; word-break:break-word; }
+    table.data .num { width:1%; white-space:nowrap; }
+    table.data .mobile-hide { display:none; }
+    .card { padding:14px; }
+    .card .label { font-size:12px; }
+    .card .value { font-size:24px; }
+    select, input[type=text], input[type=number] { font-size:15px; padding:8px 10px; }
+    .btn { font-size:13px; padding:7px 11px; }
+    h2.block-title { font-size:14px; }
+    .mobile-nav { display:flex !important; }
+    .mobile-nav a { font-size:14px; padding:8px 14px; }
+  }
+  .mobile-nav {
+    display:none; gap:6px; overflow-x:auto; padding:8px 14px;
+    background:var(--bg-2); border-bottom:1px solid var(--line);
+    scrollbar-width:none;
+  }
+  .mobile-nav::-webkit-scrollbar { display:none; }
+  .mobile-nav a {
+    flex-shrink:0; padding:6px 12px; border-radius:8px; font-size:12px;
+    color:var(--ink-2); background:var(--surface); border:1px solid var(--line);
+    white-space:nowrap;
+  }
+  .mobile-nav a.active { background:var(--ink); color:var(--bg); border-color:var(--ink); }
 
   h2.block-title { font-size:13px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:var(--ink-3); margin:0 0 10px 2px; }
   select, input[type=text], input[type=number] { font-family:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); }
@@ -184,6 +216,15 @@
       <button class="btn" type="button" id="blur-toggle" title="Blur čísel">Blur</button>
       {% block topbar_actions %}{% endblock %}
     </div>
+    <nav class="mobile-nav">
+      <a href="/" class="{% if nav == 'dashboard' %}active{% endif %}">Dashboard</a>
+      <a href="/transactions" class="{% if nav == 'tx' %}active{% endif %}">Transakcie</a>
+      <a href="/accounts" class="{% if nav == 'accounts' %}active{% endif %}">Účty</a>
+      <a href="/categories" class="{% if nav == 'categories' %}active{% endif %}">Kategórie</a>
+      <a href="/rules" class="{% if nav == 'rules' %}active{% endif %}">Pravidlá</a>
+      <a href="/summary" class="{% if nav == 'summary' %}active{% endif %}">Reporty</a>
+      <a href="/import" class="{% if nav == 'import' %}active{% endif %}">Import</a>
+    </nav>
     <div class="body">
       {% if consent_warnings %}
         {% for w in consent_warnings %}

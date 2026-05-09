@@ -106,12 +106,12 @@
   <div>
     <h2 class="block-title">Účty</h2>
     <table class="data">
-      <tr><th>Banka / IBAN</th><th>Mena</th><th class="num">Tx</th></tr>
+      <tr><th>Banka / IBAN</th><th class="num">Mena</th><th class="num">Tx</th></tr>
       {% for a in accounts %}
         <tr>
           <td><a href="/accounts/{{ a.id }}/tx" style="color:var(--ink); font-weight:500;">{{ a.name or a.iban }}</a><br>
               <span class="mono" style="font-size:11px; color:var(--ink-3);">{{ a.iban }}</span></td>
-          <td class="mono">{{ a.currency }}</td>
+          <td class="mono num">{{ a.currency }}</td>
           <td class="num mono tnum">{{ a.tx_count }}</td>
         </tr>
       {% endfor %}
