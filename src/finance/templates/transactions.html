@@ -28,7 +28,7 @@
     <tr>
       <th>Dátum</th>
       <th>Counterparty / typ</th>
-      <th>Info / poznámka</th>
+      <th class="mobile-hide">Info / poznámka</th>
       <th class="num">Suma</th>
       <th>Kategória</th>
     </tr>
@@ -53,7 +53,7 @@
           {% elif t.tx_type %}<span style="color:var(--ink-3); font-style:italic;">{{ t.tx_type }}</span>
           {% else %}—{% endif %}
         </td>
-        <td style="color:var(--ink-3); font-size:12px;">
+        <td class="mobile-hide" style="color:var(--ink-3); font-size:12px;">
           {% if t.remittance_info %}<div>{{ t.remittance_info }}</div>{% endif %}
           <form class="inline" method="post" action="/accounts/{{ account.id }}/tx/{{ t.entry_reference }}/note" style="margin-top:2px;">
             <input type="hidden" name="uncat" value="{{ uncat }}">
