@@ -1,6 +1,6 @@
-# finance-dashboard
+# Groš
 
-Self-hosted osobný finančný dashboard. Agreguje bankové transakcie zo SK/LT/CZ účtov, kategorizuje ich pravidlami, sleduje cashflow a sporiace ciele. Beží na Raspberry Pi 5, prístupný len cez Tailscale (alebo `127.0.0.1` lokálne).
+Self-hosted osobný finančný dashboard. (Repo: `finance-dashboard`) Agreguje bankové transakcie zo SK/LT/CZ účtov, kategorizuje ich pravidlami, sleduje cashflow a sporiace ciele. Beží na Raspberry Pi 5, prístupný len cez Tailscale (alebo `127.0.0.1` lokálne).
 
 **Status:** v0.5 — plne použiteľné pre vlastné nasadenie. Single-user.
 
