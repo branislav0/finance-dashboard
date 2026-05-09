@@ -7,6 +7,9 @@
   <a class="btn{% if uncat %} btn-primary{% endif %}" href="/accounts/{{ account.id }}/tx?uncat={% if uncat %}0{% else %}1{% endif %}">
     {% if uncat %}Všetky{% else %}Len nezaradené{% endif %}
   </a>
+  <a class="btn{% if show_hidden %} btn-primary{% endif %}" href="/accounts/{{ account.id }}/tx?show_hidden={% if show_hidden %}0{% else %}1{% endif %}">
+    {% if show_hidden %}Skryť skryté{% else %}Ukáž skryté{% endif %}
+  </a>
 {% endblock %}
 
 {% block content %}
@@ -30,8 +33,21 @@
       <th>Kategória</th>
     </tr>
     {% for t in txs %}
-      <tr id="tx-{{ t.entry_reference }}">
-        <td class="mono" style="white-space:nowrap;">{{ t.booking_date or '—' }}</td>
+      <tr id="tx-{{ t.entry_reference }}"{% if t.hidden %} style="opacity:0.45;"{% endif %}>
+        <td class="mono" style="white-space:nowrap;">
+          {{ t.booking_date or '—' }}
+          {% if t.hidden %}
+            <form class="inline" method="post" action="/accounts/{{ account.id }}/tx/{{ t.entry_reference }}/unhide" style="margin-top:2px;">
+              <button class="btn" type="submit" style="font-size:10px; padding:2px 6px;" title="Obnoviť">↺</button>
+            </form>
+          {% else %}
+            <form class="inline" method="post" action="/accounts/{{ account.id }}/tx/{{ t.entry_reference }}/hide"
+                  onsubmit="return confirm('Skryť túto transakciu? Nebude rátaná do KPI ani buffera.');" style="margin-top:2px;">
+              <input type="hidden" name="uncat" value="{{ uncat }}">
+              <button class="btn" type="submit" style="font-size:10px; padding:2px 6px; color:var(--ink-3);" title="Skryť">✕</button>
+            </form>
+          {% endif %}
+        </td>
         <td>
           {% if t.counterparty_name %}{{ t.counterparty_name }}
           {% elif t.tx_type %}<span style="color:var(--ink-3); font-style:italic;">{{ t.tx_type }}</span>

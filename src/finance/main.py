@@ -29,6 +29,54 @@ def _fmt(amount: float, currency: str = "", decimals: int = 0) -> str:
     return f"{sign}{s}{(' ' + currency) if currency else ''}"
 
 
+_BUFFER_TARGET_CZK = 81000.0
+_BUFFER_CATEGORY_NAME = "Sporenie"
+_BUFFER_PER_PAYCHECK_CZK = 9000.0
+
+
+def _buffer_progress(today: date) -> dict:
+    year = today.year
+    saved = 0.0
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(CAST(t.amount AS REAL)), 0) AS s "
+            "FROM transactions t JOIN categories c ON c.id = t.category_id "
+            "WHERE c.name = ? AND t.currency = 'CZK' "
+            "AND substr(t.booking_date, 1, 4) = ? "
+            "AND t.credit_debit = 'DBIT' "
+            "AND COALESCE(t.hidden, 0) = 0",
+            (_BUFFER_CATEGORY_NAME, str(year)),
+        ).fetchone()
+        if row:
+            saved = float(row["s"] or 0.0)
+    target = _BUFFER_TARGET_CZK
+    remaining = max(0.0, target - saved)
+    pct = min(100, int(round((saved / target) * 100))) if target else 0
+    import math
+    paychecks_left = math.ceil(remaining / _BUFFER_PER_PAYCHECK_CZK) if remaining > 0 else 0
+    months_done = today.month - 1 + (today.day / 30.0)
+    pace = saved / months_done if months_done > 0 else 0.0
+    eta_months = int(round(remaining / pace)) if pace > 0 else None
+    eta_label = None
+    if eta_months is not None and eta_months > 0:
+        eta_dt = today.replace(day=1)
+        for _ in range(eta_months):
+            eta_dt = (eta_dt.replace(day=28) + timedelta(days=4)).replace(day=1)
+        eta_label = eta_dt.strftime("%Y-%m")
+    return {
+        "year": year,
+        "saved": _fmt(saved),
+        "target": _fmt(target),
+        "remaining": _fmt(remaining),
+        "pct": pct,
+        "paychecks_left": paychecks_left,
+        "per_paycheck": _fmt(_BUFFER_PER_PAYCHECK_CZK),
+        "pace": _fmt(pace) if pace > 0 else None,
+        "eta": eta_label,
+        "on_track": pace * 12 >= target if pace > 0 else False,
+    }
+
+
 def _sidebar_context() -> dict:
     """Build the sidebar category-totals + sync-status block, primary currency CZK."""
     rows = db.summary_by_category()
@@ -158,7 +206,7 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
         for r in conn.execute(
             "SELECT t.credit_debit, t.amount, t.currency, t.category_id, c.kind "
             "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
-            "WHERE substr(t.booking_date, 1, 7) = ?",
+            "WHERE substr(t.booking_date, 1, 7) = ? AND COALESCE(t.hidden, 0) = 0",
             (month,),
         ):
             tx_count += 1
@@ -200,6 +248,7 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
             "SELECT t.booking_date, t.counterparty_name, t.remittance_info, t.amount, "
             "t.currency, t.credit_debit, c.name AS category_name "
             "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
+            "WHERE COALESCE(t.hidden, 0) = 0 "
             "ORDER BY t.booking_date DESC, t.entry_reference DESC LIMIT 10"
         ):
             recent.append(dict(r))
@@ -217,6 +266,9 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
         m = (today.replace(day=1) - timedelta(days=30 * i)).strftime("%Y-%m")
         if m not in months:
             months.append(m)
+
+    buffer = _buffer_progress(today)
+
     ctx = {
         "nav": "dashboard",
         "kpi": kpi,
@@ -225,6 +277,7 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
         "month": month,
         "months": months,
         "synced": synced,
+        "buffer": buffer,
         **_sidebar_context(),
     }
     return templates.TemplateResponse(request, "dashboard.html", ctx)
@@ -391,7 +444,7 @@ def transactions_all(
     q: str | None = None,
     limit: int = 500,
 ):
-    where = ["1=1"]
+    where = ["COALESCE(t.hidden, 0) = 0"]
     args: list = []
     if uncat:
         where.append("t.category_id IS NULL")
@@ -497,12 +550,20 @@ def _category_select(cats, selected: int | None, name: str = "category_id") -> s
 
 @app.get("/accounts/{account_id}/tx", response_class=HTMLResponse)
 def show_transactions(
-    request: Request, account_id: int, synced: str | None = None, uncat: int = 0
+    request: Request,
+    account_id: int,
+    synced: str | None = None,
+    uncat: int = 0,
+    show_hidden: int = 0,
 ):
     account = db.get_account(account_id)
     if not account:
         raise HTTPException(404, "Account not found")
-    txs = db.list_transactions(account_id, only_uncategorized=bool(uncat))
+    txs = db.list_transactions(
+        account_id,
+        only_uncategorized=bool(uncat),
+        include_hidden=bool(show_hidden),
+    )
     cats = db.list_categories()
     ctx = {
         "nav": "tx",
@@ -510,6 +571,7 @@ def show_transactions(
         "txs": [dict(t) for t in txs],
         "cats": [dict(c) for c in cats],
         "uncat": uncat,
+        "show_hidden": show_hidden,
         "synced": synced,
         **_sidebar_context(),
     }
@@ -610,6 +672,18 @@ def set_tx_category(
     return RedirectResponse(
         url=f"/accounts/{account_id}/tx?uncat={uncat}{anchor}", status_code=303
     )
+
+
+@app.post("/accounts/{account_id}/tx/{entry_ref:path}/hide")
+def hide_tx(account_id: int, entry_ref: str, uncat: int = Form(0)) -> RedirectResponse:
+    db.set_transaction_hidden(account_id, entry_ref, True)
+    return RedirectResponse(url=f"/accounts/{account_id}/tx?uncat={uncat}", status_code=303)
+
+
+@app.post("/accounts/{account_id}/tx/{entry_ref:path}/unhide")
+def unhide_tx(account_id: int, entry_ref: str) -> RedirectResponse:
+    db.set_transaction_hidden(account_id, entry_ref, False)
+    return RedirectResponse(url=f"/accounts/{account_id}/tx?show_hidden=1", status_code=303)
 
 
 @app.post("/accounts/{account_id}/tx/{entry_ref:path}/note")
