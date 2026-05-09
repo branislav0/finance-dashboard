@@ -240,7 +240,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="finance-dashboard", lifespan=lifespan)
+app = FastAPI(title="Groš", lifespan=lifespan)
 
 
 PUBLIC_PATHS = {"/login", "/healthz", "/logout"}
