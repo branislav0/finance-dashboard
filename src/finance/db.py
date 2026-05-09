@@ -125,6 +125,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE transactions ADD COLUMN tx_type TEXT")
         if "note" not in cols:
             conn.execute("ALTER TABLE transactions ADD COLUMN note TEXT")
+        if "hidden" not in cols:
+            conn.execute("ALTER TABLE transactions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
     _migrate_categories_allow_transfer()
     _seed_categories_if_empty()
     _ensure_transfer_category()
@@ -293,7 +295,7 @@ def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int,
             cp = (t.get("creditor") or {}).get("name") or (t.get("debtor") or {}).get("name")
             info = (t.get("remittance_information") or [None])[0]
             existing = conn.execute(
-                "SELECT category_id, manual_override, note FROM transactions "
+                "SELECT category_id, manual_override, note, hidden FROM transactions "
                 "WHERE account_id = ? AND entry_reference = ?",
                 (account_id, ref),
             ).fetchone()
@@ -303,12 +305,13 @@ def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int,
                 category_id = _match_rules(rules, cp, info)
             tx_type = _bank_tx_label(t)
             preserved_note = existing["note"] if existing else None
+            preserved_hidden = existing["hidden"] if existing else 0
             conn.execute(
                 """INSERT OR REPLACE INTO transactions
                    (account_id, entry_reference, booking_date, amount, currency,
                     credit_debit, counterparty_name, remittance_info, status,
-                    raw_json, synced_at, category_id, manual_override, tx_type, note)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)""",
+                    raw_json, synced_at, category_id, manual_override, tx_type, note, hidden)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)""",
                 (
                     account_id,
                     ref,
@@ -324,6 +327,7 @@ def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int,
                     1 if (existing and existing["manual_override"]) else 0,
                     tx_type,
                     preserved_note,
+                    preserved_hidden,
                 ),
             )
             if existing:
@@ -560,11 +564,16 @@ def delete_category(category_id: int) -> None:
 
 
 def list_transactions(
-    account_id: int, limit: int = 500, only_uncategorized: bool = False
+    account_id: int,
+    limit: int = 500,
+    only_uncategorized: bool = False,
+    include_hidden: bool = False,
 ) -> list[sqlite3.Row]:
     where = "t.account_id = ?"
     if only_uncategorized:
         where += " AND t.category_id IS NULL"
+    if not include_hidden:
+        where += " AND COALESCE(t.hidden, 0) = 0"
     with connect() as conn:
         return conn.execute(
             f"""SELECT t.*, c.name AS category_name
@@ -575,6 +584,14 @@ def list_transactions(
                LIMIT ?""",
             (account_id, limit),
         ).fetchall()
+
+
+def set_transaction_hidden(account_id: int, entry_reference: str, hidden: bool) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE transactions SET hidden = ? WHERE account_id = ? AND entry_reference = ?",
+            (1 if hidden else 0, account_id, entry_reference),
+        )
 
 
 def set_transaction_category(
