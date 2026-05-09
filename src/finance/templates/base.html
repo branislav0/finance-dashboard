@@ -111,6 +111,13 @@
   h2.block-title { font-size:13px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:var(--ink-3); margin:0 0 10px 2px; }
   select, input[type=text], input[type=number] { font-family:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); }
   form.inline { display:inline-flex; gap:6px; align-items:center; margin:0; }
+
+  body.blur-mode .tnum,
+  body.blur-mode .mono,
+  body.blur-mode .amt,
+  body.blur-mode .total { filter: blur(6px); transition: filter 0.15s; }
+  body.blur-mode .tnum:hover,
+  body.blur-mode .mono:hover { filter: none; }
 </style>
 </head>
 <body>
@@ -131,6 +138,7 @@
       <a href="/categories" class="{% if nav == 'categories' %}active{% endif %}">Kategórie</a>
       <a href="/rules" class="{% if nav == 'rules' %}active{% endif %}">Pravidlá</a>
       <a href="/summary" class="{% if nav == 'summary' %}active{% endif %}">Reporty</a>
+      <a href="/import" class="{% if nav == 'import' %}active{% endif %}">Import výpisu</a>
     </nav>
 
     <div class="scroll">
@@ -173,6 +181,7 @@
     <div class="topbar">
       <h1>{% block heading %}{{ self.title() }}{% endblock %}</h1>
       <div class="spacer"></div>
+      <button class="btn" type="button" id="blur-toggle" title="Blur čísel">Blur</button>
       {% block topbar_actions %}{% endblock %}
     </div>
     <div class="body">
@@ -196,5 +205,16 @@
     </div>
   </main>
 </div>
+<script>
+  (function() {
+    const KEY = 'blur-mode';
+    if (localStorage.getItem(KEY) === '1') document.body.classList.add('blur-mode');
+    const btn = document.getElementById('blur-toggle');
+    if (btn) btn.addEventListener('click', () => {
+      document.body.classList.toggle('blur-mode');
+      localStorage.setItem(KEY, document.body.classList.contains('blur-mode') ? '1' : '0');
+    });
+  })();
+</script>
 </body>
 </html>

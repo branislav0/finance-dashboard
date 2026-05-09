@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from html import escape
@@ -17,6 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from finance import db
 from finance import auth
+from finance.csv_import import parse_csob_csv
 from finance.providers.enablebanking import from_env as enablebanking_from_env
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -274,6 +275,47 @@ def categories_rename(category_id: int, name: str = Form(...)) -> RedirectRespon
 def categories_delete(category_id: int) -> RedirectResponse:
     db.delete_category(category_id)
     return RedirectResponse(url="/categories", status_code=303)
+
+
+@app.get("/import", response_class=HTMLResponse)
+def import_form(request: Request, ok: str | None = None, err: str | None = None):
+    return templates.TemplateResponse(
+        request,
+        "import.html",
+        {"nav": "import", "ok": ok, "err": err, **_sidebar_context()},
+    )
+
+
+@app.post("/import")
+async def import_submit(file: UploadFile = File(...)) -> RedirectResponse:
+    try:
+        content = await file.read()
+        info, txs = parse_csob_csv(content)
+    except (ValueError, UnicodeDecodeError) as e:
+        return RedirectResponse(url=f"/import?err={escape(str(e))}", status_code=303)
+    if not txs:
+        return RedirectResponse(url="/import?err=Žiadne+transakcie+v+súbore", status_code=303)
+
+    account_no = info["account_no"] or "manual"
+    currency = info["currency"]
+    iban = f"CSOB-CZ-{account_no}"
+    session_id = "manual-csob-cz"
+    payload = {
+        "session_id": session_id,
+        "aspsp": {"name": "ČSOB CZ (manual)", "country": "CZ"},
+        "access": {"valid_until": None},
+        "accounts": [{
+            "uid": iban,
+            "account_id": {"iban": iban},
+            "currency": currency,
+            "name": f"ČSOB CZ {account_no}",
+        }],
+    }
+    ids = db.save_session_and_accounts(payload)
+    account_id = ids[0]
+    inserted, updated = db.upsert_transactions(account_id, txs)
+    msg = f"Importovaných+{inserted}+nových,+{updated}+aktualizovaných"
+    return RedirectResponse(url=f"/import?ok={msg}", status_code=303)
 
 
 @app.get("/connect/mock/{country}")
@@ -564,8 +606,9 @@ def set_tx_category(
 ) -> RedirectResponse:
     cat_id = int(category_id) if category_id else None
     db.set_transaction_category(account_id, entry_ref, cat_id, manual=True)
+    anchor = f"#tx-{entry_ref}"
     return RedirectResponse(
-        url=f"/accounts/{account_id}/tx?uncat={uncat}", status_code=303
+        url=f"/accounts/{account_id}/tx?uncat={uncat}{anchor}", status_code=303
     )
 
 

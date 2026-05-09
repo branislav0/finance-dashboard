@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Import výpisu{% endblock %}
+{% block heading %}Import výpisu{% endblock %}
+
+{% block content %}
+{% if ok %}
+  <div class="card" style="margin-bottom:14px; border-color: var(--pos);">
+    <strong style="color: var(--pos);">✓</strong> {{ ok.replace('+', ' ') }}
+  </div>
+{% endif %}
+{% if err %}
+  <div class="card" style="margin-bottom:14px; border-color: var(--neg);">
+    <strong style="color: var(--neg);">✕</strong> {{ err.replace('+', ' ') }}
+  </div>
+{% endif %}
+
+<div class="card" style="max-width:560px;">
+  <h2 class="block-title">ČSOB CZ — CSV výpis</h2>
+  <p style="color:var(--ink-3); font-size:13px; margin-top:0;">
+    V ČSOB Smart bankingu: <strong>Pohyby na účtu</strong> → <strong>Stáhnout / Export</strong> → CSV.
+    Re-upload je bezpečný — duplikáty (podľa <code>ID transakce</code>) sa preskočia.
+  </p>
+  <form method="post" action="/import" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".csv,text/csv" required
+           style="display:block; margin:12px 0; color:var(--ink);">
+    <button class="btn btn-primary" type="submit">Importovať</button>
+  </form>
+</div>
+{% endblock %}
