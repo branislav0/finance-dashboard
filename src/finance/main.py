@@ -34,6 +34,119 @@ _BUFFER_CATEGORY_NAME = "Sporenie"
 _BUFFER_PER_PAYCHECK_CZK = 9000.0
 
 
+_CASHFLOW_CURRENCIES = {"CZK"}
+
+
+def _daily_cashflow(today: date, currency: str = "CZK") -> dict:
+    """Daily expense bars for the current month."""
+    month_key = today.strftime("%Y-%m")
+    days_in_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    n_days = days_in_month.day
+    daily = [0.0] * n_days
+    income_total = expense_total = 0.0
+    with db.connect() as conn:
+        for r in conn.execute(
+            "SELECT t.booking_date, t.credit_debit, t.amount, c.kind "
+            "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
+            "WHERE substr(t.booking_date, 1, 7) = ? AND t.currency = ? "
+            "AND COALESCE(t.hidden, 0) = 0",
+            (month_key, currency),
+        ):
+            if r["kind"] == "transfer":
+                continue
+            try:
+                amt = float(r["amount"])
+            except (TypeError, ValueError):
+                continue
+            try:
+                day = int(r["booking_date"][8:10])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if r["credit_debit"] == "CRDT":
+                income_total += amt
+            else:
+                expense_total += amt
+                if 1 <= day <= n_days:
+                    daily[day - 1] += amt
+    peak = max(daily) if daily else 0.0
+    bars = []
+    for i, v in enumerate(daily, start=1):
+        bars.append({
+            "day": i,
+            "amount": v,
+            "amount_label": _fmt(v),
+            "pct": int(round((v / peak) * 100)) if peak else 0,
+            "is_today": i == today.day,
+            "is_future": i > today.day,
+        })
+    net = income_total - expense_total
+    return {
+        "month": month_key,
+        "currency": currency,
+        "bars": bars,
+        "income": _fmt(income_total),
+        "expense": _fmt(expense_total),
+        "net": ("+" if net >= 0 else "") + _fmt(net),
+        "net_pos": net >= 0,
+        "n_days": n_days,
+        "today_day": today.day,
+    }
+
+
+def _cashflow_history(today: date, months: int = 6) -> dict:
+    keys: list[str] = []
+    cursor = today.replace(day=1)
+    for _ in range(months):
+        keys.append(cursor.strftime("%Y-%m"))
+        cursor = (cursor - timedelta(days=1)).replace(day=1)
+    keys.reverse()
+    by_ccy: dict[str, dict[str, dict[str, float]]] = {}
+    with db.connect() as conn:
+        for r in conn.execute(
+            "SELECT substr(t.booking_date, 1, 7) AS m, t.currency, t.credit_debit, t.amount, c.kind "
+            "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
+            "WHERE substr(t.booking_date, 1, 7) IN (" + ",".join("?" * len(keys)) + ") "
+            "AND COALESCE(t.hidden, 0) = 0",
+            keys,
+        ):
+            if r["kind"] == "transfer":
+                continue
+            try:
+                amt = float(r["amount"])
+            except (TypeError, ValueError):
+                continue
+            ccy = r["currency"] or "?"
+            if ccy not in _CASHFLOW_CURRENCIES:
+                continue
+            slot = by_ccy.setdefault(ccy, {k: {"in": 0.0, "out": 0.0} for k in keys})[r["m"]]
+            if r["credit_debit"] == "CRDT":
+                slot["in"] += amt
+            else:
+                slot["out"] += amt
+    series = {}
+    for ccy, monthly in by_ccy.items():
+        rows = []
+        peak = 0.0
+        for k in keys:
+            d = monthly[k]
+            peak = max(peak, d["in"], d["out"])
+            rows.append({
+                "month": k[5:],
+                "income": d["in"],
+                "expense": d["out"],
+                "net": d["in"] - d["out"],
+            })
+        for r in rows:
+            r["in_pct"] = int(round((r["income"] / peak) * 100)) if peak else 0
+            r["out_pct"] = int(round((r["expense"] / peak) * 100)) if peak else 0
+            r["income_label"] = _fmt(r["income"])
+            r["expense_label"] = _fmt(r["expense"])
+            r["net_label"] = ("+" if r["net"] >= 0 else "") + _fmt(r["net"])
+            r["net_pos"] = r["net"] >= 0
+        series[ccy] = rows
+    return {"currencies": [{"currency": c, "rows": series[c]} for c in sorted(series.keys())]}
+
+
 def _buffer_progress(today: date) -> dict:
     year = today.year
     saved = 0.0
@@ -268,6 +381,7 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
             months.append(m)
 
     buffer = _buffer_progress(today)
+    cashflow = _daily_cashflow(today, currency="CZK")
 
     ctx = {
         "nav": "dashboard",
@@ -278,9 +392,22 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
         "months": months,
         "synced": synced,
         "buffer": buffer,
+        "cashflow": cashflow,
         **_sidebar_context(),
     }
     return templates.TemplateResponse(request, "dashboard.html", ctx)
+
+
+@app.get("/graf", response_class=HTMLResponse)
+def graf_view(request: Request):
+    today = date.today()
+    yearly = _cashflow_history(today, months=12)
+    ctx = {
+        "nav": "graf",
+        "yearly": yearly,
+        **_sidebar_context(),
+    }
+    return templates.TemplateResponse(request, "graf.html", ctx)
 
 
 @app.get("/categories", response_class=HTMLResponse)
