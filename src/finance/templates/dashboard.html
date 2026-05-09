@@ -81,6 +81,47 @@
   </div>
 </div>
 
+{% if cashflow %}
+<div class="card" style="margin-top:18px; padding:18px 20px;">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px; flex-wrap:wrap; gap:12px;">
+    <div>
+      <div class="label">Tento mesiac · {{ cashflow.currency }}</div>
+      <div style="margin-top:4px; font-size:13px; color:var(--ink-3);">
+        <span class="pos mono tnum">+{{ cashflow.income }}</span>
+        <span style="margin:0 8px;">·</span>
+        <span class="neg mono tnum">−{{ cashflow.expense }}</span>
+        <span style="margin:0 8px;">·</span>
+        Net <strong class="mono tnum {% if cashflow.net_pos %}pos{% else %}neg{% endif %}">{{ cashflow.net }}</strong>
+      </div>
+    </div>
+    <a href="/graf" class="btn" style="font-size:12px;">Ročný graf →</a>
+  </div>
+  <div style="position:relative; height:120px; padding-top:6px;">
+    <div style="position:absolute; left:0; right:0; bottom:18px; border-top:1px dashed var(--line-2);"></div>
+    <div style="display:flex; align-items:flex-end; gap:2px; height:100%; padding-bottom:18px;">
+      {% for b in cashflow.bars %}
+        <div style="flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center;"
+             title="{{ b.day }}.: {% if b.amount > 0 %}−{{ b.amount_label }} {{ cashflow.currency }}{% else %}—{% endif %}">
+          {% if b.is_future %}
+            <div style="width:100%; height:2px; background:var(--line-2); border-radius:1px;"></div>
+          {% else %}
+            <div style="width:100%; height:{% if b.pct > 0 %}{{ b.pct }}%{% else %}2px{% endif %}; min-height:2px;
+                        background:{% if b.is_today %}var(--accent){% elif b.amount > 0 %}var(--neg){% else %}var(--line-2){% endif %};
+                        border-radius:2px 2px 0 0; opacity:{% if b.amount > 0 %}0.85{% else %}0.4{% endif %};
+                        transition:opacity 0.15s;"></div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <div style="position:absolute; left:0; right:0; bottom:0; display:flex; justify-content:space-between; font-size:10px; color:var(--ink-3); font-family:'Geist Mono', monospace;">
+      <span>1</span>
+      <span>{{ (cashflow.n_days // 2) }}</span>
+      <span>{{ cashflow.n_days }}</span>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="split-grid" style="margin-top:18px;">
   <div>
     <h2 class="block-title">Posledné transakcie</h2>

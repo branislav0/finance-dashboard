@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Graf{% endblock %}
+{% block heading %}Cashflow — 12 mesiacov{% endblock %}
+
+{% block content %}
+{% for c in yearly.currencies %}
+<div class="card" style="padding:18px 20px; margin-bottom:14px;">
+  <div class="label" style="margin-bottom:14px;">{{ c.currency }}</div>
+
+  <div style="position:relative; height:200px;">
+    <div style="position:absolute; left:0; right:0; top:50%; border-top:1px dashed var(--line-2);"></div>
+    <div style="display:flex; gap:8px; height:100%;">
+      {% for r in c.rows %}
+        <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:1px;"
+             title="{{ r.month }}: +{{ r.income_label }} / −{{ r.expense_label }} = {{ r.net_label }}">
+          <div style="height:50%; display:flex; flex-direction:column; justify-content:flex-end;">
+            <div style="width:100%; height:{{ r.in_pct }}%; min-height:2px; background:linear-gradient(180deg, var(--pos), oklch(0.65 0.15 150)); border-radius:3px 3px 0 0; opacity:0.9;"></div>
+          </div>
+          <div style="height:50%; display:flex; flex-direction:column; justify-content:flex-start;">
+            <div style="width:100%; height:{{ r.out_pct }}%; min-height:2px; background:linear-gradient(0deg, var(--neg), oklch(0.55 0.15 28)); border-radius:0 0 3px 3px; opacity:0.9;"></div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div style="display:flex; gap:8px; margin-top:8px;">
+    {% for r in c.rows %}
+      <div style="flex:1; text-align:center; font-size:10px; color:var(--ink-3); font-family:'Geist Mono', monospace;">
+        {{ r.month }}
+      </div>
+    {% endfor %}
+  </div>
+
+  <div style="display:flex; gap:8px; margin-top:4px;">
+    {% for r in c.rows %}
+      <div style="flex:1; text-align:center; font-size:10px;" class="mono tnum">
+        <span style="color:{% if r.net_pos %}var(--pos){% else %}var(--neg){% endif %};">{{ r.net_label }}</span>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div style="margin-top:18px; display:flex; gap:18px; font-size:11px; color:var(--ink-3);">
+    <span><span style="display:inline-block; width:10px; height:10px; background:var(--pos); border-radius:2px; vertical-align:middle; margin-right:4px;"></span>Príjem</span>
+    <span><span style="display:inline-block; width:10px; height:10px; background:var(--neg); border-radius:2px; vertical-align:middle; margin-right:4px;"></span>Výdaj</span>
+  </div>
+</div>
+{% endfor %}
+
+{% if not yearly.currencies %}
+  <div class="card" style="padding:24px; text-align:center; color:var(--ink-3);">
+    Žiadne dáta na zobrazenie.
+  </div>
+{% endif %}
+{% endblock %}
