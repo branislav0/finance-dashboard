@@ -6,9 +6,9 @@
   <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap:8px;">
     {% for r in roots %}
       <div class="card" style="padding:12px 14px;">
-        <form class="inline" method="post" action="/categories/{{ r.id }}/rename" style="width:100%;">
-          <input type="text" name="name" value="{{ r.name }}" style="flex:1; font-weight:600; font-size:13px;">
-          <button class="btn" type="submit" title="Premenovať">✎</button>
+        <form class="inline" method="post" action="/categories/{{ r.id }}/rename" style="width:100%; display:flex; gap:6px;">
+          <input type="text" name="name" value="{{ r.name }}" style="flex:1; min-width:0; font-weight:600; font-size:13px;">
+          <button class="btn" type="submit" title="Premenovať" style="flex-shrink:0;">✎</button>
         </form>
         <form class="inline" method="post" action="/categories/{{ r.id }}/delete" style="margin-top:4px;"
               onsubmit="return confirm('Zmazať kategóriu {{ r.name }}? Transakcie sa stanú nezaradenými.');">
@@ -18,24 +18,24 @@
         {% if children %}
           <ul style="margin:8px 0 0; padding-left:14px; font-size:12px; color:var(--ink-3); list-style:none;">
             {% for c in children %}
-              <li style="margin:3px 0; display:flex; gap:4px; align-items:center;">
-                <form class="inline" method="post" action="/categories/{{ c.id }}/rename">
-                  <input type="text" name="name" value="{{ c.name }}" style="font-size:11px; padding:2px 6px;">
-                  <button class="btn" type="submit" style="font-size:10px; padding:2px 6px;">✎</button>
+              <li style="margin:3px 0; display:flex; gap:4px; align-items:center; min-width:0;">
+                <form class="inline" method="post" action="/categories/{{ c.id }}/rename" style="flex:1; min-width:0; display:flex; gap:4px;">
+                  <input type="text" name="name" value="{{ c.name }}" style="flex:1; min-width:0; font-size:11px; padding:2px 6px;">
+                  <button class="btn" type="submit" style="font-size:10px; padding:2px 6px; flex-shrink:0;">✎</button>
                 </form>
                 <form class="inline" method="post" action="/categories/{{ c.id }}/delete"
-                      onsubmit="return confirm('Zmazať {{ c.name }}?');">
+                      onsubmit="return confirm('Zmazať {{ c.name }}?');" style="flex-shrink:0;">
                   <button class="btn" type="submit" style="color:var(--neg); font-size:10px; padding:2px 6px;">✕</button>
                 </form>
               </li>
             {% endfor %}
           </ul>
         {% endif %}
-        <form class="inline" method="post" action="/categories/add" style="margin-top:6px;">
+        <form class="inline" method="post" action="/categories/add" style="margin-top:6px; display:flex; gap:4px;">
           <input type="hidden" name="kind" value="{{ kind }}">
           <input type="hidden" name="parent_id" value="{{ r.id }}">
-          <input type="text" name="name" placeholder="+ podkategória" style="font-size:11px; padding:2px 6px; flex:1;">
-          <button class="btn" type="submit" style="font-size:10px; padding:2px 6px;">+</button>
+          <input type="text" name="name" placeholder="+ podkategória" style="font-size:11px; padding:2px 6px; flex:1; min-width:0;">
+          <button class="btn" type="submit" style="font-size:10px; padding:2px 6px; flex-shrink:0;">+</button>
         </form>
       </div>
     {% endfor %}

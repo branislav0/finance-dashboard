@@ -30,7 +30,7 @@
       <th>Kategória</th>
     </tr>
     {% for t in txs %}
-      <tr>
+      <tr id="tx-{{ t.entry_reference }}">
         <td class="mono" style="white-space:nowrap;">{{ t.booking_date or '—' }}</td>
         <td>
           {% if t.counterparty_name %}{{ t.counterparty_name }}
@@ -70,4 +70,41 @@
       <tr><td colspan="5" style="text-align:center; color:var(--ink-3); padding:24px;">Žiadne transakcie</td></tr>
     {% endif %}
   </table>
+<script>
+(function() {
+  const onlyUncat = new URLSearchParams(location.search).get('uncat') === '1';
+  document.querySelectorAll('form[action$="/category"]').forEach(f => {
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(f);
+      const btn = f.querySelector('button');
+      const orig = btn ? btn.textContent : '';
+      if (btn) btn.textContent = '…';
+      try {
+        const r = await fetch(f.action, { method: 'POST', body: fd });
+        if (!r.ok && r.status !== 303) throw new Error(r.status);
+        const tr = f.closest('tr');
+        const newCat = fd.get('category_id');
+        if (onlyUncat && newCat) {
+          if (tr) { tr.style.transition = 'opacity 0.3s'; tr.style.opacity = '0';
+                    setTimeout(() => tr.remove(), 300); }
+        } else {
+          if (btn) { btn.textContent = '✓✓';
+                     setTimeout(() => { btn.textContent = orig || '✓'; }, 800); }
+          // Mark manual override visually
+          const star = f.querySelector('span');
+          if (newCat && !star) {
+            const s = document.createElement('span');
+            s.style.color = 'var(--accent)'; s.style.fontWeight = '600';
+            s.textContent = '*'; f.appendChild(s);
+          }
+        }
+      } catch (err) {
+        if (btn) btn.textContent = '✕';
+        setTimeout(() => f.submit(), 600); // fallback
+      }
+    });
+  });
+})();
+</script>
 {% endblock %}
