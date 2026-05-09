@@ -29,9 +29,9 @@ def _fmt(amount: float, currency: str = "", decimals: int = 0) -> str:
     return f"{sign}{s}{(' ' + currency) if currency else ''}"
 
 
-_BUFFER_TARGET_CZK = 81000.0
-_BUFFER_CATEGORY_NAME = "Sporenie"
-_BUFFER_PER_PAYCHECK_CZK = 9000.0
+_BUFFER_TARGET_CZK = float(os.getenv("BUFFER_TARGET_CZK", "50000"))
+_BUFFER_CATEGORY_NAME = os.getenv("BUFFER_CATEGORY_NAME", "Sporenie")
+_BUFFER_PER_PAYCHECK_CZK = float(os.getenv("BUFFER_PER_PAYCHECK_CZK", "5000"))
 
 
 _CASHFLOW_CURRENCIES = {"CZK"}
