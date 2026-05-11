@@ -18,7 +18,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from finance import db
 from finance import auth
 from finance.csv_import import parse_csob_csv
+from finance.providers import claude as claude_provider
 from finance.providers.enablebanking import from_env as enablebanking_from_env
+
+load_dotenv()
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -190,9 +193,27 @@ def _buffer_progress(today: date) -> dict:
     }
 
 
-def _sidebar_context() -> dict:
-    """Build the sidebar category-totals + sync-status block, primary currency CZK."""
-    rows = db.summary_by_category()
+def _sidebar_months(count: int = 12) -> list[str]:
+    """Return last N months as YYYY-MM strings, most recent first."""
+    out = []
+    cursor = date.today().replace(day=1)
+    for _ in range(count):
+        out.append(cursor.strftime("%Y-%m"))
+        cursor = (cursor - timedelta(days=1)).replace(day=1)
+    return out
+
+
+def _sidebar_context(request: Request | None = None) -> dict:
+    """Build the sidebar category-totals + sync-status block, primary currency CZK.
+
+    Reads cookie `sb_month`: "YYYY-MM" filters that month, "all" = all-time,
+    missing = defaults to current month.
+    """
+    today = date.today()
+    default_month = today.strftime("%Y-%m")
+    sb_month = (request.cookies.get("sb_month") if request else None) or default_month
+    month_filter = None if sb_month == "all" else sb_month
+    rows = db.summary_by_category(month=month_filter)
     income = {}
     expense = {}
     income_total = 0.0
@@ -227,9 +248,9 @@ def _sidebar_context() -> dict:
         "sidebar_expense_total": _fmt(expense_total, "CZK") if expense_total else None,
         "accounts_count": len(accounts),
         "sync_status": "sync: pri requeste",
+        "sb_month": sb_month,
+        "sb_months_available": _sidebar_months(12),
     }
-
-load_dotenv()
 
 _pending_states: dict[str, dict[str, str]] = {}
 
@@ -393,9 +414,60 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
         "synced": synced,
         "buffer": buffer,
         "cashflow": cashflow,
-        **_sidebar_context(),
+        **_sidebar_context(request),
     }
     return templates.TemplateResponse(request, "dashboard.html", ctx)
+
+
+@app.post("/categorize-ai")
+def categorize_ai() -> RedirectResponse:
+    txs = db.list_uncategorized_transactions(limit=200)
+    if not txs:
+        return RedirectResponse(url="/transactions?ai_msg=Žiadne+nezaradené+transakcie", status_code=303)
+    cats = db.categories_with_parent_name()
+    examples = db.list_manual_examples(limit=40)
+    try:
+        results = claude_provider.categorize_transactions(txs, cats, examples)
+    except claude_provider.CategorizationError as e:
+        return RedirectResponse(url=f"/transactions?ai_err={escape(str(e))}", status_code=303)
+    except Exception as e:
+        return RedirectResponse(url=f"/transactions?ai_err=AI+failed:+{escape(str(e)[:80])}", status_code=303)
+    applied = 0
+    for r in results:
+        try:
+            db.set_transaction_category(
+                _account_id_for_ref(r["entry_reference"]),
+                r["entry_reference"],
+                r["category_id"],
+                manual=False,
+            )
+            applied += 1
+        except Exception:
+            continue
+    skipped = len(txs) - applied
+    msg = f"AI+zaradila+{applied}+tx,+{skipped}+nechala+nezaradených"
+    return RedirectResponse(url=f"/transactions?uncat=1&ai_msg={msg}", status_code=303)
+
+
+def _account_id_for_ref(entry_ref: str) -> int:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT account_id FROM transactions WHERE entry_reference = ? LIMIT 1",
+            (entry_ref,),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"tx not found: {entry_ref}")
+        return row["account_id"]
+
+
+@app.post("/sb-month")
+def set_sidebar_month(request: Request, month: str = Form(...), next: str = Form("/")):
+    """Set the sidebar month filter cookie and redirect back."""
+    safe_next = next if next.startswith("/") else "/"
+    resp = RedirectResponse(url=safe_next, status_code=303)
+    if month == "all" or (len(month) == 7 and month[4] == "-"):
+        resp.set_cookie("sb_month", month, max_age=60 * 60 * 24 * 365, samesite="lax")
+    return resp
 
 
 @app.get("/graf", response_class=HTMLResponse)
@@ -405,7 +477,7 @@ def graf_view(request: Request):
     ctx = {
         "nav": "graf",
         "yearly": yearly,
-        **_sidebar_context(),
+        **_sidebar_context(request),
     }
     return templates.TemplateResponse(request, "graf.html", ctx)
 
@@ -423,7 +495,7 @@ def categories_view(request: Request):
         "income_roots": [c for c in roots if c["kind"] == "income"],
         "expense_roots": [c for c in roots if c["kind"] == "expense"],
         "transfer_roots": [c for c in roots if c["kind"] == "transfer"],
-        **_sidebar_context(),
+        **_sidebar_context(request),
     }
     return templates.TemplateResponse(request, "categories.html", ctx)
 
@@ -462,7 +534,7 @@ def import_form(request: Request, ok: str | None = None, err: str | None = None)
     return templates.TemplateResponse(
         request,
         "import.html",
-        {"nav": "import", "ok": ok, "err": err, **_sidebar_context()},
+        {"nav": "import", "ok": ok, "err": err, **_sidebar_context(request)},
     )
 
 
@@ -555,7 +627,7 @@ def accounts_view(request: Request):
                 (a["id"],),
             ).fetchone()[0]
             accounts.append({**dict(a), "tx_count": cnt, "uncat": uncat})
-    ctx = {"nav": "accounts", "accounts": accounts, **_sidebar_context()}
+    ctx = {"nav": "accounts", "accounts": accounts, **_sidebar_context(request)}
     return templates.TemplateResponse(request, "accounts.html", ctx)
 
 
@@ -569,6 +641,8 @@ def transactions_all(
     amount_min: str | None = None,
     amount_max: str | None = None,
     q: str | None = None,
+    ai_msg: str | None = None,
+    ai_err: str | None = None,
     limit: int = 500,
 ):
     where = ["COALESCE(t.hidden, 0) = 0"]
@@ -624,7 +698,9 @@ def transactions_all(
         "amount_min": amount_min or "",
         "amount_max": amount_max or "",
         "q": q or "",
-        **_sidebar_context(),
+        "ai_msg": ai_msg,
+        "ai_err": ai_err,
+        **_sidebar_context(request),
     }
     return templates.TemplateResponse(request, "transactions_all.html", ctx)
 
@@ -700,7 +776,7 @@ def show_transactions(
         "uncat": uncat,
         "show_hidden": show_hidden,
         "synced": synced,
-        **_sidebar_context(),
+        **_sidebar_context(request),
     }
     return templates.TemplateResponse(request, "transactions.html", ctx)
 
@@ -712,7 +788,7 @@ def rules_view(request: Request, msg: str | None = None):
         "rules": [dict(r) for r in db.list_rules()],
         "cats": [dict(c) for c in db.list_categories()],
         "msg": msg,
-        **_sidebar_context(),
+        **_sidebar_context(request),
     }
     return templates.TemplateResponse(request, "rules.html", ctx)
 
@@ -781,7 +857,7 @@ def summary_view(request: Request):
         "nav": "summary",
         "main_items": to_items(False),
         "transfer_items": to_items(True),
-        **_sidebar_context(),
+        **_sidebar_context(request),
     }
     return templates.TemplateResponse(request, "summary.html", ctx)
 

@@ -464,10 +464,21 @@ def generate_rules_from_manual() -> int:
     return added
 
 
-def summary_by_category() -> list[sqlite3.Row]:
+def summary_by_category(month: str | None = None) -> list[sqlite3.Row]:
+    """Aggregate transactions by category.
+
+    Args:
+        month: optional "YYYY-MM" string. If provided, filters to that month
+            by `booking_date` prefix. None = all-time.
+    """
+    where = "WHERE COALESCE(t.hidden, 0) = 0"
+    params: list = []
+    if month:
+        where += " AND t.booking_date LIKE ?"
+        params.append(f"{month}-%")
     with connect() as conn:
         return conn.execute(
-            """SELECT
+            f"""SELECT
                  COALESCE(c.name, '(nezaradené)') AS category_name,
                  COALESCE(c.kind, '') AS kind,
                  t.currency,
@@ -476,8 +487,10 @@ def summary_by_category() -> list[sqlite3.Row]:
                  COUNT(*) AS cnt
                FROM transactions t
                LEFT JOIN categories c ON c.id = t.category_id
+               {where}
                GROUP BY t.category_id, t.currency, t.credit_debit
-               ORDER BY c.kind DESC, category_name, t.currency"""
+               ORDER BY c.kind DESC, category_name, t.currency""",
+            params,
         ).fetchall()
 
 
@@ -530,6 +543,43 @@ def list_categories() -> list[sqlite3.Row]:
             "SELECT id, name, parent_id, kind FROM categories "
             "ORDER BY kind DESC, COALESCE(parent_id, id), id"
         ).fetchall()
+
+
+def categories_with_parent_name() -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT c.id, c.name, c.kind, p.name AS parent_name "
+            "FROM categories c LEFT JOIN categories p ON p.id = c.parent_id "
+            "ORDER BY c.kind DESC, COALESCE(c.parent_id, c.id), c.id"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_uncategorized_transactions(limit: int = 200) -> list[dict]:
+    """All visible (non-hidden), non-transfer-categorized, uncategorized tx across accounts."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT t.account_id, t.entry_reference, t.counterparty_name, t.remittance_info, "
+            "t.amount, t.currency, t.credit_debit "
+            "FROM transactions t "
+            "WHERE t.category_id IS NULL AND COALESCE(t.hidden, 0) = 0 "
+            "ORDER BY t.booking_date DESC, t.entry_reference DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_manual_examples(limit: int = 40) -> list[dict]:
+    """Recent manually-categorized tx (used as few-shot for AI)."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT t.counterparty_name, t.remittance_info, t.category_id, c.name AS category_name "
+            "FROM transactions t JOIN categories c ON c.id = t.category_id "
+            "WHERE t.manual_override = 1 AND COALESCE(t.hidden, 0) = 0 "
+            "ORDER BY t.synced_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def add_category(name: str, kind: str, parent_id: int | None = None) -> int:

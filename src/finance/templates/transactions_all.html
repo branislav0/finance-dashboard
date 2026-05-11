@@ -3,6 +3,10 @@
 {% block heading %}Všetky transakcie{% endblock %}
 
 {% block topbar_actions %}
+  <form method="post" action="/categorize-ai" class="inline" style="margin:0;"
+        onsubmit="this.querySelector('button').textContent='⏳ AI rozmýšľa…'; this.querySelector('button').disabled=true;">
+    <button class="btn" type="submit" title="Pošle nezaradené tx do Claude API">🤖 AI categorize</button>
+  </form>
   <a class="btn{% if uncat %} btn-primary{% endif %}" href="/transactions?uncat={% if uncat %}0{% else %}1{% endif %}{% if category %}&category={{ category }}{% endif %}">
     {% if uncat %}Všetky{% else %}Len nezaradené{% endif %}
   </a>
@@ -12,6 +16,16 @@
 {% endblock %}
 
 {% block content %}
+  {% if ai_msg %}
+    <div class="card" style="margin-bottom:12px; border-color: var(--pos);">
+      <strong style="color: var(--pos);">🤖</strong> {{ ai_msg.replace('+', ' ') }}
+    </div>
+  {% endif %}
+  {% if ai_err %}
+    <div class="card" style="margin-bottom:12px; border-color: var(--neg);">
+      <strong style="color: var(--neg);">AI error:</strong> {{ ai_err.replace('+', ' ') }}
+    </div>
+  {% endif %}
   <form method="get" action="/transactions" class="card" style="margin-bottom:12px; padding:12px 14px; display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
     <input type="hidden" name="uncat" value="{{ uncat }}">
     {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
