@@ -175,6 +175,18 @@
     </nav>
 
     <div class="scroll">
+      {% if sb_months_available %}
+      <form method="post" action="/sb-month" style="padding:8px 12px; border-bottom:1px solid var(--line);">
+        <input type="hidden" name="next" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+        <label style="font-size:10px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.5px;">Obdobie</label>
+        <select name="month" onchange="this.form.submit()" style="width:100%; margin-top:4px; padding:5px 8px; background:var(--bg-2); color:var(--ink); border:1px solid var(--line); border-radius:6px; font-size:12px;">
+          <option value="all" {% if sb_month == 'all' %}selected{% endif %}>Celý čas</option>
+          {% for m in sb_months_available %}
+            <option value="{{ m }}" {% if sb_month == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% endif %}
       <div class="section">
         <div class="section-title">
           <span>Príjmy</span>
