@@ -22,30 +22,19 @@
 
 {% if buffer %}
 <div class="card" style="margin-bottom:14px; padding:14px 18px;">
-  <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-    <div>
-      <div class="label">Sporiaci cieľ {{ buffer.year }}</div>
-      <div style="font-size:20px; font-weight:600; margin-top:2px;">
-        <span class="mono tnum">{{ buffer.saved }}</span>
-        <span style="color:var(--ink-3); font-size:14px;"> / <span class="mono tnum">{{ buffer.target }}</span> CZK</span>
-      </div>
-    </div>
-    <div style="text-align:right; font-size:12px; color:var(--ink-3);">
-      <div><span class="mono tnum" style="color:var(--ink); font-weight:600; font-size:16px;">{{ buffer.pct }}%</span></div>
-      <div>zostáva <span class="mono tnum">{{ buffer.remaining }}</span> CZK</div>
+  <div style="margin-bottom:8px;">
+    <div class="label">Sporiaci cieľ {{ buffer.year }}</div>
+    <div style="font-size:20px; font-weight:600; margin-top:2px;">
+      <span class="mono tnum">{{ buffer.saved }}</span>
+      <span style="color:var(--ink-3); font-size:14px;"> / <span class="mono tnum">{{ buffer.target }}</span> CZK</span>
+      <span class="mono tnum" style="margin-left:10px; color:#10B981; font-size:16px;">{{ buffer.pct }}%</span>
     </div>
   </div>
   <div style="height:10px; background:var(--bg-2); border-radius:99px; overflow:hidden; border:1px solid var(--line-2);">
-    <div style="height:100%; width:{{ buffer.pct }}%; background:linear-gradient(90deg, var(--pos), var(--accent)); transition:width 0.4s;"></div>
+    <div style="height:100%; width:{{ buffer.pct }}%; background:#10B981; transition:width 0.4s;"></div>
   </div>
-  <div style="display:flex; gap:18px; margin-top:8px; font-size:12px; color:var(--ink-3); flex-wrap:wrap;">
-    <span>Zostáva výplat: <strong class="mono tnum" style="color:var(--ink);">{{ buffer.paychecks_left }}</strong> × <span class="mono tnum">{{ buffer.per_paycheck }}</span> CZK</span>
-    {% if buffer.pace %}
-      <span>Tempo: <span class="mono tnum">{{ buffer.pace }}</span> CZK/mes</span>
-    {% endif %}
-    {% if buffer.eta %}
-      <span>Pri tomto tempe dosiahneš cieľ: <strong style="color:{% if buffer.on_track %}var(--pos){% else %}var(--neg){% endif %};">{{ buffer.eta }}</strong></span>
-    {% endif %}
+  <div style="margin-top:8px; font-size:12px; color:var(--ink-3);">
+    Zostáva výplat: <strong class="mono tnum" style="color:var(--ink);">{{ buffer.paychecks_left }}</strong> × <span class="mono tnum">{{ buffer.per_paycheck }}</span> CZK
   </div>
 </div>
 {% endif %}

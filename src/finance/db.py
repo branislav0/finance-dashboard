@@ -66,6 +66,15 @@ CREATE TABLE IF NOT EXISTS category_rules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rules_priority ON category_rules(priority);
+
+CREATE TABLE IF NOT EXISTS fx_rates (
+  rate_date TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  qty INTEGER NOT NULL DEFAULT 1,
+  rate_czk REAL NOT NULL,
+  fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (rate_date, currency)
+);
 """
 
 SEED_CATEGORIES: list[tuple[str, str, list[str]]] = [
@@ -127,6 +136,9 @@ def init_db() -> None:
             conn.execute("ALTER TABLE transactions ADD COLUMN note TEXT")
         if "hidden" not in cols:
             conn.execute("ALTER TABLE transactions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+        cat_cols = {r["name"] for r in conn.execute("PRAGMA table_info(categories)")}
+        if "monthly_budget_czk" not in cat_cols:
+            conn.execute("ALTER TABLE categories ADD COLUMN monthly_budget_czk REAL")
     _migrate_categories_allow_transfer()
     _seed_categories_if_empty()
     _ensure_transfer_category()
@@ -464,6 +476,39 @@ def generate_rules_from_manual() -> int:
     return added
 
 
+def transactions_for_summary(
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[sqlite3.Row]:
+    """Return raw rows (one per tx) for summary aggregation in Python,
+    so we can per-tx convert non-CZK amounts using ČNB rates.
+
+    Excludes hidden tx. `date_from`/`date_to` are inclusive ISO dates.
+    """
+    where = "WHERE COALESCE(t.hidden, 0) = 0"
+    params: list = []
+    if date_from:
+        where += " AND t.booking_date >= ?"
+        params.append(date_from)
+    if date_to:
+        where += " AND t.booking_date <= ?"
+        params.append(date_to)
+    with connect() as conn:
+        return conn.execute(
+            f"""SELECT
+                 COALESCE(c.name, '(nezaradené)') AS category_name,
+                 COALESCE(c.kind, '') AS kind,
+                 t.booking_date,
+                 t.currency,
+                 t.credit_debit,
+                 t.amount
+               FROM transactions t
+               LEFT JOIN categories c ON c.id = t.category_id
+               {where}""",
+            params,
+        ).fetchall()
+
+
 def summary_by_category(month: str | None = None) -> list[sqlite3.Row]:
     """Aggregate transactions by category.
 
@@ -540,9 +585,18 @@ def list_accounts() -> list[sqlite3.Row]:
 def list_categories() -> list[sqlite3.Row]:
     with connect() as conn:
         return conn.execute(
-            "SELECT id, name, parent_id, kind FROM categories "
+            "SELECT id, name, parent_id, kind, monthly_budget_czk FROM categories "
             "ORDER BY kind DESC, COALESCE(parent_id, id), id"
         ).fetchall()
+
+
+def set_category_budget(category_id: int, monthly_budget_czk: float | None) -> None:
+    """Set monthly budget for a category. Pass None to unset."""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE categories SET monthly_budget_czk = ? WHERE id = ?",
+            (monthly_budget_czk, category_id),
+        )
 
 
 def categories_with_parent_name() -> list[dict]:
@@ -661,3 +715,120 @@ def set_transaction_note(account_id: int, entry_reference: str, note: str | None
             "UPDATE transactions SET note = ? WHERE account_id = ? AND entry_reference = ?",
             (note, account_id, entry_reference),
         )
+
+
+# ---- FX rates (ČNB) ----
+
+def _store_rates(conn, rate_date: str, rates: dict[str, tuple[int, float]]) -> None:
+    """Insert all currencies fetched from ČNB for one date (idempotent)."""
+    for code, (qty, rate) in rates.items():
+        conn.execute(
+            "INSERT OR REPLACE INTO fx_rates (rate_date, currency, qty, rate_czk) "
+            "VALUES (?, ?, ?, ?)",
+            (rate_date, code, qty, rate),
+        )
+
+
+def get_fx_rate(d, currency: str) -> tuple[int, float] | None:
+    """Return (qty, rate_czk) for a (date, currency) pair.
+
+    Args:
+        d: datetime.date or "YYYY-MM-DD" string.
+        currency: ISO code, e.g. "EUR". "CZK" returns (1, 1.0) trivially.
+
+    Strategy:
+        1. CZK → (1, 1.0)
+        2. Look up exact date in fx_rates cache.
+        3. Cache miss → call ČNB API, store ALL currencies for that day,
+           return requested one.
+        4. ČNB unreachable / no rate → walk back up to 7 days for nearest
+           cached rate (covers weekends/holidays + offline mode).
+        5. Still nothing → None.
+    """
+    from datetime import date as _date, timedelta
+    from finance.providers.cnb import fetch_daily_rates, CnbError
+
+    currency = currency.upper()
+    if currency == "CZK":
+        return (1, 1.0)
+
+    if isinstance(d, str):
+        try:
+            d = _date.fromisoformat(d[:10])
+        except ValueError:
+            return None
+
+    iso = d.isoformat()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT qty, rate_czk FROM fx_rates WHERE rate_date = ? AND currency = ?",
+            (iso, currency),
+        ).fetchone()
+        if row:
+            return (int(row["qty"]), float(row["rate_czk"]))
+
+        # Cache miss → try fetching from ČNB
+        try:
+            rates = fetch_daily_rates(d)
+            _store_rates(conn, iso, rates)
+            if currency in rates:
+                return rates[currency]
+        except CnbError:
+            pass
+
+        # Walk back 7 days for nearest available rate (weekends/holidays/offline)
+        for delta in range(1, 8):
+            prev = d - timedelta(days=delta)
+            row = conn.execute(
+                "SELECT qty, rate_czk FROM fx_rates "
+                "WHERE rate_date = ? AND currency = ?",
+                (prev.isoformat(), currency),
+            ).fetchone()
+            if row:
+                return (int(row["qty"]), float(row["rate_czk"]))
+    return None
+
+
+def to_czk(amount: float, currency: str, d) -> float | None:
+    """Convert `amount` in `currency` on date `d` to CZK.
+
+    Returns None if rate is unavailable (no internet, no cache).
+    """
+    pair = get_fx_rate(d, currency)
+    if pair is None:
+        return None
+    qty, rate = pair
+    return amount * (rate / qty)
+
+
+def backfill_fx_rates() -> tuple[int, int]:
+    """Pre-fetch ČNB rates for all distinct (booking_date, currency) of
+    non-CZK transactions. Returns (fetched_dates, skipped_dates)."""
+    fetched = skipped = 0
+    with connect() as conn:
+        dates = [r["d"] for r in conn.execute(
+            "SELECT DISTINCT substr(booking_date, 1, 10) AS d "
+            "FROM transactions "
+            "WHERE currency != 'CZK' AND booking_date IS NOT NULL "
+            "ORDER BY d"
+        ).fetchall() if r["d"]]
+    for iso in dates:
+        # if any row already cached for this date, skip (we store all ccys atomically)
+        with connect() as conn:
+            cnt = conn.execute(
+                "SELECT COUNT(*) AS c FROM fx_rates WHERE rate_date = ?",
+                (iso,),
+            ).fetchone()["c"]
+        if cnt > 0:
+            skipped += 1
+            continue
+        try:
+            from datetime import date as _date
+            from finance.providers.cnb import fetch_daily_rates
+            rates = fetch_daily_rates(_date.fromisoformat(iso))
+            with connect() as conn:
+                _store_rates(conn, iso, rates)
+            fetched += 1
+        except Exception:
+            continue
+    return fetched, skipped

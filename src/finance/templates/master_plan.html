@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Master plan{% endblock %}
+{% block heading %}Master plan{% endblock %}
+
+{% block content %}
+  <div class="card" style="margin-bottom:14px; padding:14px 18px;">
+    <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+      <div>
+        <div class="label">Obdobie</div>
+        <div style="font-size:16px; font-weight:600; margin-top:2px;">
+          <span class="mono tnum">{{ plan.period_start }}</span>
+          <span style="color:var(--ink-3);"> → </span>
+          <span class="mono tnum">{{ plan.period_end }}</span>
+        </div>
+      </div>
+      {% if plan.rows %}
+      <div style="text-align:right; font-size:12px; color:var(--ink-3);">
+        <div>
+          <span class="mono tnum" style="color:var(--ink); font-weight:600; font-size:16px;">{{ plan.total_spent_label }}</span>
+          <span style="color:var(--ink-3);"> / <span class="mono tnum">{{ plan.total_budget_label }}</span> CZK</span>
+          <span class="mono tnum" style="margin-left:8px; color:#10B981; font-size:14px;">{{ plan.total_pct }}%</span>
+        </div>
+        <div style="margin-top:2px;">
+          {% if plan.total_remaining_pos %}
+            ostáva <span class="mono tnum" style="color:var(--pos);">{{ plan.total_remaining_label }}</span> CZK
+          {% else %}
+            prekročené o <span class="mono tnum" style="color:var(--neg);">{{ plan.total_remaining_label }}</span> CZK
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if not plan.rows %}
+    <div class="card" style="padding:24px; text-align:center; color:var(--ink-3);">
+      Žiadne kategórie zatiaľ nemajú nastavený budget.
+      <div style="margin-top:8px;">Otvor <a href="/categories" style="color:var(--accent);">Kategórie</a> a nastav budget pri výdajových položkách.</div>
+    </div>
+  {% else %}
+    <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:10px;">
+      {% for it in plan.rows %}
+        <div class="card" style="padding:12px 14px;">
+          <div style="display:flex; align-items:baseline; justify-content:space-between; gap:6px;">
+            <a href="/transactions?category={{ it.id }}" style="font-weight:600; font-size:14px; color:var(--ink); text-decoration:none;">{{ it.name }}</a>
+            <span class="mono tnum" style="font-size:13px; color: {% if it.over %}var(--neg){% else %}#10B981{% endif %};">{{ it.pct }}%</span>
+          </div>
+          <div style="margin-top:4px; font-size:12px; color:var(--ink-3);">
+            <span class="mono tnum">{{ it.spent_label }}</span>
+            <span> / <span class="mono tnum">{{ it.budget_label }}</span> CZK</span>
+          </div>
+          <div style="margin-top:6px; height:8px; background:var(--bg-2); border-radius:99px; overflow:hidden; border:1px solid var(--line-2);">
+            <div style="height:100%; width:{{ it.pct }}%; background: {% if it.over %}var(--neg){% else %}#10B981{% endif %}; transition:width 0.4s;"></div>
+          </div>
+          <div style="margin-top:6px; font-size:11px; color:var(--ink-3);">
+            {% if it.remaining_pos %}
+              ostáva <span class="mono tnum" style="color:var(--ink);">{{ it.remaining_label }}</span> CZK
+            {% else %}
+              prekročené o <span class="mono tnum" style="color:var(--neg);">{{ it.remaining_label }}</span> CZK
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <p style="font-size:11px; color:var(--ink-3); margin-top:16px;">
+    Master plan ráta výdaje od {{ plan.period_start }}. Od ďalšieho mesiaca sa obdobie reštartuje na 1. dňa daného mesiaca.
+  </p>
+{% endblock %}
