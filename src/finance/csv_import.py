@@ -64,11 +64,16 @@ def parse_csob_csv(content: bytes) -> tuple[dict, list[dict]]:
             continue
         ccy = (row.get("měna") or "CZK").strip() or "CZK"
         currency = ccy
-        date_raw = (row.get("datum zaúčtování") or "").strip()
-        booking_date = _date_iso(date_raw)
+        settle_date_raw = (row.get("datum zaúčtování") or "").strip()
         op = (row.get("označení operace") or "").strip()
         cp_name = (row.get("jméno protistrany") or "").strip() or op or None
-        msg = _clean_remittance(row.get("zpráva") or "")
+        raw_msg = row.get("zpráva") or ""
+        msg = _clean_remittance(raw_msg)
+        # For card payments, the real tx date is embedded in `zpráva` as DD.MM.YYYY.
+        # Prefer it over settlement date (`datum zaúčtování`) which can lag 1-5 days.
+        tx_date = _extract_tx_date(raw_msg)
+        booking_date = tx_date or _date_iso(settle_date_raw)
+        date_raw = settle_date_raw  # kept for ref/synth backwards-compat
         ref = (row.get("ID transakce") or "").strip()
         if not ref:
             ref = _synth_ref(date_raw, amount_raw, msg or op)
@@ -113,6 +118,22 @@ def _clean_remittance(s: str) -> str:
     if not candidates:
         return s
     return min(candidates, key=len)
+
+
+def _extract_tx_date(msg: str) -> str | None:
+    """Extract the real transaction date from ČSOB `zpráva` field.
+
+    Card payments have the format: 'Částka: X CZK DD.MM.YYYY Místo: ...'.
+    The DD.MM.YYYY here is the actual purchase date (vs. settlement date
+    which is in `datum zaúčtování` and can lag by several days).
+    """
+    if not msg:
+        return None
+    m = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", msg)
+    if not m:
+        return None
+    d, mo, y = m.groups()
+    return f"{y}-{mo}-{d}"
 
 
 def _date_iso(date_raw: str) -> str | None:

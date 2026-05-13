@@ -35,13 +35,14 @@ def _fmt(amount: float, currency: str = "", decimals: int = 0) -> str:
 _BUFFER_TARGET_CZK = float(os.getenv("BUFFER_TARGET_CZK", "50000"))
 _BUFFER_CATEGORY_NAME = os.getenv("BUFFER_CATEGORY_NAME", "Sporenie")
 _BUFFER_PER_PAYCHECK_CZK = float(os.getenv("BUFFER_PER_PAYCHECK_CZK", "5000"))
+_MASTER_PLAN_START = os.getenv("MASTER_PLAN_START", "2026-05-13")
 
 
 _CASHFLOW_CURRENCIES = {"CZK"}
 
 
 def _daily_cashflow(today: date, currency: str = "CZK") -> dict:
-    """Daily expense bars for the current month."""
+    """Daily expense bars for the current month (all currencies → CZK)."""
     month_key = today.strftime("%Y-%m")
     days_in_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
     n_days = days_in_month.day
@@ -49,11 +50,11 @@ def _daily_cashflow(today: date, currency: str = "CZK") -> dict:
     income_total = expense_total = 0.0
     with db.connect() as conn:
         for r in conn.execute(
-            "SELECT t.booking_date, t.credit_debit, t.amount, c.kind "
+            "SELECT t.booking_date, t.credit_debit, t.amount, t.currency, c.kind "
             "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
-            "WHERE substr(t.booking_date, 1, 7) = ? AND t.currency = ? "
+            "WHERE substr(t.booking_date, 1, 7) = ? "
             "AND COALESCE(t.hidden, 0) = 0",
-            (month_key, currency),
+            (month_key,),
         ):
             if r["kind"] == "transfer":
                 continue
@@ -61,6 +62,11 @@ def _daily_cashflow(today: date, currency: str = "CZK") -> dict:
                 amt = float(r["amount"])
             except (TypeError, ValueError):
                 continue
+            if r["currency"] != "CZK":
+                converted = db.to_czk(amt, r["currency"], r["booking_date"])
+                if converted is None:
+                    continue
+                amt = converted
             try:
                 day = int(r["booking_date"][8:10])
             except (TypeError, ValueError, IndexError):
@@ -103,10 +109,11 @@ def _cashflow_history(today: date, months: int = 6) -> dict:
         keys.append(cursor.strftime("%Y-%m"))
         cursor = (cursor - timedelta(days=1)).replace(day=1)
     keys.reverse()
-    by_ccy: dict[str, dict[str, dict[str, float]]] = {}
+    by_ccy: dict[str, dict[str, dict[str, float]]] = {"CZK": {k: {"in": 0.0, "out": 0.0} for k in keys}}
     with db.connect() as conn:
         for r in conn.execute(
-            "SELECT substr(t.booking_date, 1, 7) AS m, t.currency, t.credit_debit, t.amount, c.kind "
+            "SELECT substr(t.booking_date, 1, 7) AS m, t.booking_date, t.currency, "
+            "t.credit_debit, t.amount, c.kind "
             "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
             "WHERE substr(t.booking_date, 1, 7) IN (" + ",".join("?" * len(keys)) + ") "
             "AND COALESCE(t.hidden, 0) = 0",
@@ -118,10 +125,12 @@ def _cashflow_history(today: date, months: int = 6) -> dict:
                 amt = float(r["amount"])
             except (TypeError, ValueError):
                 continue
-            ccy = r["currency"] or "?"
-            if ccy not in _CASHFLOW_CURRENCIES:
-                continue
-            slot = by_ccy.setdefault(ccy, {k: {"in": 0.0, "out": 0.0} for k in keys})[r["m"]]
+            if r["currency"] != "CZK":
+                converted = db.to_czk(amt, r["currency"], r["booking_date"])
+                if converted is None:
+                    continue
+                amt = converted
+            slot = by_ccy["CZK"][r["m"]]
             if r["credit_debit"] == "CRDT":
                 slot["in"] += amt
             else:
@@ -193,6 +202,96 @@ def _buffer_progress(today: date) -> dict:
     }
 
 
+def _master_plan_period(today: date) -> tuple[str, str]:
+    """Return (period_start_iso, period_end_iso) for budget tracking.
+
+    Logic: master plan started on MASTER_PLAN_START (e.g. 2026-05-13).
+    - If today is in the same month as start → period = start..today
+    - If today is in a later month → period = 1st-of-month..today
+    """
+    try:
+        start = date.fromisoformat(_MASTER_PLAN_START)
+    except ValueError:
+        start = today.replace(day=1)
+    if today.year == start.year and today.month == start.month:
+        period_start = start
+    else:
+        period_start = today.replace(day=1)
+    return period_start.isoformat(), today.isoformat()
+
+
+def _master_plan_progress(today: date) -> dict:
+    """Compute per-category budget vs. spent for the current master-plan period."""
+    period_start, period_end = _master_plan_period(today)
+    cats = db.list_categories()
+    budgeted = [dict(c) for c in cats if c["monthly_budget_czk"] and c["kind"] == "expense"]
+    if not budgeted:
+        return {"period_start": period_start, "period_end": period_end, "rows": [],
+                "total_budget": 0, "total_spent": 0, "total_remaining": 0,
+                "total_pct": 0}
+
+    spent: dict[int, float] = {c["id"]: 0.0 for c in budgeted}
+    with db.connect() as conn:
+        for r in conn.execute(
+            "SELECT t.category_id, t.booking_date, t.currency, t.amount "
+            "FROM transactions t "
+            "WHERE t.credit_debit = 'DBIT' "
+            "AND t.booking_date >= ? AND t.booking_date <= ? "
+            "AND COALESCE(t.hidden, 0) = 0 "
+            "AND t.category_id IS NOT NULL",
+            (period_start, period_end),
+        ):
+            cid = r["category_id"]
+            if cid not in spent:
+                continue
+            try:
+                amt = float(r["amount"])
+            except (TypeError, ValueError):
+                continue
+            if r["currency"] != "CZK":
+                converted = db.to_czk(amt, r["currency"], r["booking_date"])
+                if converted is None:
+                    continue
+                amt = converted
+            spent[cid] += amt
+
+    items = []
+    total_budget = total_spent = 0.0
+    for c in budgeted:
+        budget = float(c["monthly_budget_czk"])
+        sp = spent[c["id"]]
+        remaining = budget - sp
+        pct = min(100, int(round((sp / budget) * 100))) if budget else 0
+        items.append({
+            "id": c["id"],
+            "name": c["name"],
+            "budget": budget,
+            "budget_label": _fmt(budget),
+            "spent": sp,
+            "spent_label": _fmt(sp),
+            "remaining": remaining,
+            "remaining_label": _fmt(abs(remaining)),
+            "remaining_pos": remaining >= 0,
+            "pct": pct,
+            "over": sp > budget,
+        })
+        total_budget += budget
+        total_spent += sp
+    items.sort(key=lambda x: x["pct"], reverse=True)
+    total_remaining = total_budget - total_spent
+    total_pct = min(100, int(round((total_spent / total_budget) * 100))) if total_budget else 0
+    return {
+        "period_start": period_start,
+        "period_end": period_end,
+        "rows": items,
+        "total_budget_label": _fmt(total_budget),
+        "total_spent_label": _fmt(total_spent),
+        "total_remaining_label": _fmt(abs(total_remaining)),
+        "total_remaining_pos": total_remaining >= 0,
+        "total_pct": total_pct,
+    }
+
+
 def _sidebar_months(count: int = 12) -> list[str]:
     """Return last N months as YYYY-MM strings, most recent first."""
     out = []
@@ -203,32 +302,71 @@ def _sidebar_months(count: int = 12) -> list[str]:
     return out
 
 
+def _sb_period(sb_month: str) -> tuple[str | None, str | None]:
+    """Map sb_month cookie value to (date_from, date_to) inclusive.
+
+    Special values:
+      - "all"          → (None, None)
+      - "master-plan"  → (MASTER_PLAN_START, today)
+      - "YYYY-MM"      → (1st, last) of that month, BUT if MASTER_PLAN_START
+                         falls in that month, the month is capped at the
+                         day BEFORE master plan starts (e.g. May → 01.05..12.05)
+    """
+    if sb_month == "all":
+        return None, None
+    today = date.today()
+    if sb_month == "master-plan":
+        return _MASTER_PLAN_START, today.isoformat()
+    if len(sb_month) == 7 and sb_month[4] == "-":
+        try:
+            y, m = int(sb_month[:4]), int(sb_month[5:7])
+        except ValueError:
+            return None, None
+        start = date(y, m, 1)
+        nxt = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
+        end = nxt - timedelta(days=1)
+        try:
+            mp = date.fromisoformat(_MASTER_PLAN_START)
+            if mp.year == y and mp.month == m:
+                end = mp - timedelta(days=1)
+                if end < start:
+                    return None, None  # empty period
+        except ValueError:
+            pass
+        return start.isoformat(), end.isoformat()
+    return None, None
+
+
 def _sidebar_context(request: Request | None = None) -> dict:
     """Build the sidebar category-totals + sync-status block, primary currency CZK.
 
-    Reads cookie `sb_month`: "YYYY-MM" filters that month, "all" = all-time,
-    missing = defaults to current month.
+    Reads cookie `sb_month`: "YYYY-MM" / "master-plan" / "all" / missing.
     """
     today = date.today()
     default_month = today.strftime("%Y-%m")
     sb_month = (request.cookies.get("sb_month") if request else None) or default_month
-    month_filter = None if sb_month == "all" else sb_month
-    rows = db.summary_by_category(month=month_filter)
-    income = {}
-    expense = {}
+    df, dt = _sb_period(sb_month)
+    rows = db.transactions_for_summary(date_from=df, date_to=dt)
+    income: dict[str, float] = {}
+    expense: dict[str, float] = {}
     income_total = 0.0
     expense_total = 0.0
     for r in rows:
-        if r["currency"] != "CZK":
+        try:
+            amt = float(r["amount"])
+        except (TypeError, ValueError):
             continue
-        if r["kind"] == "income":
-            bucket = income.setdefault(r["category_name"], 0.0)
-            income[r["category_name"]] = bucket + (float(r["total"]) if r["credit_debit"] == "CRDT" else 0.0)
-            income_total += float(r["total"]) if r["credit_debit"] == "CRDT" else 0.0
-        elif r["kind"] == "expense":
-            bucket = expense.setdefault(r["category_name"], 0.0)
-            expense[r["category_name"]] = bucket + (float(r["total"]) if r["credit_debit"] == "DBIT" else 0.0)
-            expense_total += float(r["total"]) if r["credit_debit"] == "DBIT" else 0.0
+        if r["currency"] != "CZK":
+            converted = db.to_czk(amt, r["currency"], r["booking_date"])
+            if converted is None:
+                continue
+            amt = converted
+        if r["kind"] == "income" and r["credit_debit"] == "CRDT":
+            income[r["category_name"]] = income.get(r["category_name"], 0.0) + amt
+            income_total += amt
+        elif r["kind"] == "expense" and r["credit_debit"] == "DBIT":
+            expense[r["category_name"]] = expense.get(r["category_name"], 0.0) + amt
+            expense_total += amt
 
     cats = db.list_categories()
     income_cats = [
@@ -236,7 +374,12 @@ def _sidebar_context(request: Request | None = None) -> dict:
         for c in cats if c["kind"] == "income" and c["parent_id"] is None
     ]
     expense_cats = [
-        {"id": c["id"], "name": c["name"], "amt": _fmt(expense.get(c["name"], 0.0), "CZK") if expense.get(c["name"]) else None}
+        {
+            "id": c["id"],
+            "name": c["name"],
+            "amt": _fmt(expense.get(c["name"], 0.0), "CZK") if expense.get(c["name"]) else None,
+            "budget": _fmt(c["monthly_budget_czk"]) if c["monthly_budget_czk"] else None,
+        }
         for c in cats if c["kind"] == "expense" and c["parent_id"] is None
     ]
     accounts = db.list_accounts()
@@ -460,12 +603,19 @@ def _account_id_for_ref(entry_ref: str) -> int:
         return row["account_id"]
 
 
+@app.post("/fx-refresh")
+def fx_refresh():
+    """Backfill ČNB rates for all distinct non-CZK transaction dates."""
+    fetched, skipped = db.backfill_fx_rates()
+    return RedirectResponse(url=f"/?fx_msg=fetched+{fetched}+dates,+cached+{skipped}", status_code=303)
+
+
 @app.post("/sb-month")
 def set_sidebar_month(request: Request, month: str = Form(...), next: str = Form("/")):
     """Set the sidebar month filter cookie and redirect back."""
     safe_next = next if next.startswith("/") else "/"
     resp = RedirectResponse(url=safe_next, status_code=303)
-    if month == "all" or (len(month) == 7 and month[4] == "-"):
+    if month in ("all", "master-plan") or (len(month) == 7 and month[4] == "-"):
         resp.set_cookie("sb_month", month, max_age=60 * 60 * 24 * 365, samesite="lax")
     return resp
 
@@ -480,6 +630,18 @@ def graf_view(request: Request):
         **_sidebar_context(request),
     }
     return templates.TemplateResponse(request, "graf.html", ctx)
+
+
+@app.get("/master-plan", response_class=HTMLResponse)
+def master_plan_view(request: Request):
+    today = date.today()
+    plan = _master_plan_progress(today)
+    ctx = {
+        "nav": "master-plan",
+        "plan": plan,
+        **_sidebar_context(request),
+    }
+    return templates.TemplateResponse(request, "master_plan.html", ctx)
 
 
 @app.get("/categories", response_class=HTMLResponse)
@@ -502,10 +664,13 @@ def categories_view(request: Request):
 
 @app.post("/categories/add")
 def categories_add(
-    name: str = Form(...),
-    kind: str = Form(...),
+    name: str = Form(""),
+    kind: str = Form(""),
     parent_id: str = Form(""),
 ) -> RedirectResponse:
+    name = (name or "").strip()
+    if not name or not kind:
+        return RedirectResponse(url="/categories", status_code=303)
     pid = int(parent_id) if parent_id else None
     try:
         db.add_category(name, kind, pid)
@@ -526,6 +691,22 @@ def categories_rename(category_id: int, name: str = Form(...)) -> RedirectRespon
 @app.post("/categories/{category_id}/delete")
 def categories_delete(category_id: int) -> RedirectResponse:
     db.delete_category(category_id)
+    return RedirectResponse(url="/categories", status_code=303)
+
+
+@app.post("/categories/{category_id}/budget")
+def categories_set_budget(category_id: int, budget: str = Form("")) -> RedirectResponse:
+    """Set or clear monthly budget for a category. Empty string = unset."""
+    val: float | None
+    s = (budget or "").strip().replace(" ", "").replace(",", ".")
+    if not s or s == "0":
+        val = None
+    else:
+        try:
+            val = float(s)
+        except ValueError:
+            return RedirectResponse(url="/categories?err=budget", status_code=303)
+    db.set_category_budget(category_id, val)
     return RedirectResponse(url="/categories", status_code=303)
 
 
@@ -566,7 +747,9 @@ async def import_submit(file: UploadFile = File(...)) -> RedirectResponse:
     ids = db.save_session_and_accounts(payload)
     account_id = ids[0]
     inserted, updated = db.upsert_transactions(account_id, txs)
-    msg = f"Importovaných+{inserted}+nových,+{updated}+aktualizovaných"
+    fx_fetched, _ = db.backfill_fx_rates()
+    fx_note = f"+(FX:+{fx_fetched})" if fx_fetched else ""
+    msg = f"Importovaných+{inserted}+nových,+{updated}+aktualizovaných{fx_note}"
     return RedirectResponse(url=f"/import?ok={msg}", status_code=303)
 
 
@@ -652,6 +835,16 @@ def transactions_all(
     if category:
         where.append("t.category_id = ?")
         args.append(category)
+    # Apply sidebar month filter when user hasn't set explicit dates
+    sb_month_cookie = request.cookies.get("sb_month") or date.today().strftime("%Y-%m")
+    if not date_from and not date_to:
+        sb_from, sb_to = _sb_period(sb_month_cookie)
+        if sb_from:
+            where.append("t.booking_date >= ?")
+            args.append(sb_from)
+        if sb_to:
+            where.append("t.booking_date <= ?")
+            args.append(sb_to)
     if date_from:
         where.append("t.booking_date >= ?")
         args.append(date_from)
