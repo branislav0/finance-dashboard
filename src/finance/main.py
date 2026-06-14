@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from html import escape
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -1057,13 +1057,24 @@ def summary_view(request: Request):
 
 @app.post("/accounts/{account_id}/tx/{entry_ref:path}/category")
 def set_tx_category(
+    request: Request,
     account_id: int,
     entry_ref: str,
     category_id: str = Form(""),
     uncat: int = Form(0),
-) -> RedirectResponse:
+):
     cat_id = int(category_id) if category_id else None
     db.set_transaction_category(account_id, entry_ref, cat_id, manual=True)
+    rules_added = 0
+    auto_applied = 0
+    if cat_id is not None:
+        rules_added = db.generate_rules_from_manual()
+        if rules_added:
+            auto_applied, _ = db.recategorize_all()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse(
+            {"rules_added": rules_added, "auto_applied": auto_applied}
+        )
     anchor = f"#tx-{entry_ref}"
     return RedirectResponse(
         url=f"/accounts/{account_id}/tx?uncat={uncat}{anchor}", status_code=303
