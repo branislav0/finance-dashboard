@@ -55,10 +55,9 @@
         </td>
         <td class="mobile-hide" style="color:var(--ink-3); font-size:12px;">
           {% if t.remittance_info %}<div>{{ t.remittance_info }}</div>{% endif %}
-          <form class="inline" method="post" action="/accounts/{{ account.id }}/tx/{{ t.entry_reference }}/note" style="margin-top:2px;">
+          <form class="inline note-form" method="post" action="/accounts/{{ account.id }}/tx/{{ t.entry_reference }}/note" style="margin-top:2px;">
             <input type="hidden" name="uncat" value="{{ uncat }}">
             <input type="text" name="note" value="{{ t.note or '' }}" placeholder="poznámka (Enter = uložiť)"
-                   onblur="if(this.value!==this.defaultValue)this.form.submit()"
                    style="width:160px; font-size:11px; padding:3px 6px; background:var(--bg-2); color:var(--ink); border:1px solid var(--line-2); border-radius:4px;">
           </form>
         </td>
@@ -76,7 +75,7 @@
                 </option>
               {% endfor %}
             </select>
-            <button class="btn" type="submit">✓</button>
+            <button class="btn cat-ok" type="submit" style="min-width:32px;">✓</button>
             {% if t.manual_override %}<span style="color:var(--accent); font-weight:600;">*</span>{% endif %}
           </form>
         </td>
@@ -89,24 +88,47 @@
 <script>
 (function() {
   const onlyUncat = new URLSearchParams(location.search).get('uncat') === '1';
+
+  function showToast(msg) {
+    const el = document.createElement('div');
+    el.textContent = msg;
+    el.style.cssText = 'position:fixed; bottom:20px; right:20px; background:var(--pos); color:#fff; padding:10px 16px; border-radius:6px; font-size:13px; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2500);
+  }
   document.querySelectorAll('form[action$="/category"]').forEach(f => {
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(f);
       const btn = f.querySelector('button');
-      const orig = btn ? btn.textContent : '';
-      if (btn) btn.textContent = '…';
+      if (btn) btn.disabled = true;
       try {
-        const r = await fetch(f.action, { method: 'POST', body: fd });
+        const r = await fetch(f.action, {
+          method: 'POST', body: fd,
+          headers: { 'Accept': 'application/json' },
+        });
         if (!r.ok && r.status !== 303) throw new Error(r.status);
+        let info = null;
+        try { info = await r.json(); } catch {}
         const tr = f.closest('tr');
         const newCat = fd.get('category_id');
+        const autoApplied = info && info.auto_applied ? info.auto_applied : 0;
+        if (autoApplied > 0) {
+          showToast(`Auto-zaradených ${autoApplied} ďalších transakcií`);
+          const ref = tr ? tr.id : '';
+          setTimeout(() => { location.hash = ref; location.reload(); }, 700);
+          return;
+        }
         if (onlyUncat && newCat) {
           if (tr) { tr.style.transition = 'opacity 0.3s'; tr.style.opacity = '0';
                     setTimeout(() => tr.remove(), 300); }
         } else {
-          if (btn) { btn.textContent = '✓✓';
-                     setTimeout(() => { btn.textContent = orig || '✓'; }, 800); }
+          if (btn) {
+            const prevBg = btn.style.background, prevColor = btn.style.color;
+            btn.style.background = 'var(--pos-soft)';
+            btn.style.color = 'var(--pos)';
+            setTimeout(() => { btn.style.background = prevBg; btn.style.color = prevColor; btn.disabled = false; }, 600);
+          }
           // Mark manual override visually
           const star = f.querySelector('span');
           if (newCat && !star) {
@@ -116,10 +138,31 @@
           }
         }
       } catch (err) {
-        if (btn) btn.textContent = '✕';
+        if (btn) { btn.disabled = false; }
         setTimeout(() => f.submit(), 600); // fallback
       }
     });
+  });
+
+  document.querySelectorAll('form.note-form').forEach(f => {
+    const input = f.querySelector('input[name="note"]');
+    if (!input) return;
+    const save = async () => {
+      if (input.value === input.defaultValue) return;
+      const fd = new FormData(f);
+      const prevBorder = input.style.borderColor;
+      try {
+        const r = await fetch(f.action, { method: 'POST', body: fd });
+        if (!r.ok && r.status !== 303) throw new Error(r.status);
+        input.defaultValue = input.value;
+        input.style.borderColor = 'var(--pos)';
+        setTimeout(() => { input.style.borderColor = prevBorder; }, 600);
+      } catch (err) {
+        input.style.borderColor = 'var(--neg)';
+      }
+    };
+    input.addEventListener('blur', save);
+    f.addEventListener('submit', (e) => { e.preventDefault(); input.blur(); });
   });
 })();
 </script>
