@@ -5,7 +5,7 @@
 {% block topbar_actions %}
   <form method="post" action="/categorize-ai" class="inline" style="margin:0;"
         onsubmit="this.querySelector('button').textContent='⏳ AI rozmýšľa…'; this.querySelector('button').disabled=true;">
-    <button class="btn" type="submit" title="Pošle nezaradené tx do Claude API">🤖 AI categorize</button>
+    <button class="btn" type="submit" title="Pošle nezaradené tx do AI">🤖 AI categorize</button>
   </form>
   <a class="btn{% if uncat %} btn-primary{% endif %}" href="/transactions?uncat={% if uncat %}0{% else %}1{% endif %}{% if category %}&category={{ category }}{% endif %}">
     {% if uncat %}Všetky{% else %}Len nezaradené{% endif %}

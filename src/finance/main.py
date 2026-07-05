@@ -18,7 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from finance import db
 from finance import auth
 from finance.csv_import import parse_csob_csv
-from finance.providers import claude as claude_provider
+from finance.providers import ai as ai_provider
 from finance.providers.enablebanking import from_env as enablebanking_from_env
 
 load_dotenv()
@@ -570,8 +570,8 @@ def categorize_ai() -> RedirectResponse:
     cats = db.categories_with_parent_name()
     examples = db.list_manual_examples(limit=40)
     try:
-        results = claude_provider.categorize_transactions(txs, cats, examples)
-    except claude_provider.CategorizationError as e:
+        results = ai_provider.categorize_transactions(txs, cats, examples)
+    except ai_provider.CategorizationError as e:
         return RedirectResponse(url=f"/transactions?ai_err={escape(str(e))}", status_code=303)
     except Exception as e:
         return RedirectResponse(url=f"/transactions?ai_err=AI+failed:+{escape(str(e)[:80])}", status_code=303)

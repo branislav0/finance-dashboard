@@ -6,8 +6,8 @@ from typing import Iterable
 
 import anthropic
 
-DEFAULT_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
-CONFIDENCE_THRESHOLD = float(os.getenv("CLAUDE_CONFIDENCE_THRESHOLD", "0.7"))
+DEFAULT_MODEL = os.getenv("AI_MODEL", "claude-haiku-4-5-20251001")
+CONFIDENCE_THRESHOLD = float(os.getenv("AI_CONFIDENCE_THRESHOLD", "0.7"))
 
 
 class CategorizationError(Exception):
@@ -84,7 +84,7 @@ def categorize_transactions(
     examples: list[dict] | None = None,
     model: str = DEFAULT_MODEL,
 ) -> list[dict]:
-    """Calls Claude to categorize a batch of transactions.
+    """Calls the AI model to categorize a batch of transactions.
 
     Args:
         txs: rows from db.list_transactions (must contain entry_reference, counterparty_name,
