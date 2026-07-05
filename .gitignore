@@ -42,4 +42,5 @@ Thumbs.db
 
 # Obsidian
 .obsidian/
-finance.log
+# Logs (uvicorn logy môžu obsahovať IP adresy klientov)
+*.log
