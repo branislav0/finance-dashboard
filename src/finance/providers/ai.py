@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-import json
 import os
-from typing import Iterable
+from collections.abc import Iterable
 
 import anthropic
 
 DEFAULT_MODEL = os.getenv("AI_MODEL", "claude-haiku-4-5-20251001")
 CONFIDENCE_THRESHOLD = float(os.getenv("AI_CONFIDENCE_THRESHOLD", "0.7"))
+
+# Optional personal hints for the categorization prompt. Kept out of source so the
+# repo stays free of personal data; set them in .env if you want the model to
+# recognize your own name (self-transfers) and your salary payer as income.
+OWNER_NAME = os.getenv("OWNER_NAME", "").strip()
+SALARY_PAYER = os.getenv("SALARY_PAYER", "").strip()
 
 
 class CategorizationError(Exception):
@@ -59,7 +64,9 @@ def _examples_block(examples: Iterable[dict]) -> str:
     for ex in examples:
         cp = ex.get("counterparty_name") or "—"
         info = (ex.get("remittance_info") or "")[:80]
-        lines.append(f"- counterparty: \"{cp}\" | info: \"{info}\" → kategória id {ex['category_id']} ({ex['category_name']})")
+        lines.append(
+            f'- counterparty: "{cp}" | info: "{info}" → kategória id {ex["category_id"]} ({ex["category_name"]})'
+        )
     return "\n".join(lines)
 
 
@@ -72,7 +79,7 @@ def _txs_block(txs: Iterable[dict]) -> str:
         cur = t.get("currency", "")
         cd = "+" if t.get("credit_debit") == "CRDT" else "−"
         lines.append(
-            f"- ref: {t['entry_reference']} | counterparty: \"{cp}\" | info: \"{info}\" "
+            f'- ref: {t["entry_reference"]} | counterparty: "{cp}" | info: "{info}" '
             f"| {cd}{amt} {cur}"
         )
     return "\n".join(lines)
@@ -100,6 +107,14 @@ def categorize_transactions(
         return []
     if not categories:
         raise CategorizationError("No categories defined yet")
+
+    # Personal hints injected only when configured via env (see OWNER_NAME / SALARY_PAYER).
+    income_hint = ""
+    if SALARY_PAYER:
+        income_hint += f"{SALARY_PAYER}, "
+    if OWNER_NAME:
+        income_hint += f"{OWNER_NAME} (vlastný presun), "
+    owner_clause = f", alebo je to '{OWNER_NAME}'" if OWNER_NAME else ""
 
     system = (
         "Si triediča osobných bankových transakcií zo SK/CZ/EU bánk. "
@@ -135,7 +150,7 @@ def categorize_transactions(
         "Poplatok, Bank fee, ČSOB, ATM výber, Cash withdrawal, Trvalý príkaz, Inkaso, "
         "STK, RPSN, úrok, kontokorent.\n\n"
         "**Príjem (CRDT):**\n"
-        "Mzda, výplata, plat, Salary, R ALTRA SPOL, BRANISLAV ČIŽMÁR (vlastný presun), "
+        f"Mzda, výplata, plat, Salary, {income_hint}"
         "Vrátená platba, refund, cashback, dividenda, úrok pripísaný.\n\n"
         "## Pravidlá\n"
         "- Hľadaj substring match na merchant názvy hore (napr. 'ALBERT VAM DEKUJE' → "
@@ -145,8 +160,9 @@ def categorize_transactions(
         "  preskoč, neraď.\n"
         "- Pri záporných sumách = výdaj (DBIT), pri kladných = príjem (CRDT). "
         "  Mapuj na kategóriu správneho `kind`.\n"
-        "- Pri presunoch medzi vlastnými účtami (counterparty má rovnaké priezvisko ako majiteľ, "
-        "  alebo je to 'BRANISLAV ČIŽMÁR' atď.) použi kategóriu typu 'transfer' (napr. Sporenie).\n"
+        "- Pri presunoch medzi vlastnými účtami "
+        f"(counterparty má rovnaké priezvisko ako majiteľ{owner_clause}) "
+        "použi kategóriu typu 'transfer' (napr. Sporenie).\n"
         "- **Historické príklady používateľa majú prioritu** nad mojou všeobecnou znalosťou. "
         "  Ak používateľ podobnú transakciu zaradil inde, urob to tak isto.\n"
         "- Confidence: 0.9+ pre jasné prípady, 0.7-0.9 pre rozumné dohad, pod 0.7 PRESKOČ.\n"
@@ -179,11 +195,13 @@ def categorize_transactions(
                 conf = float(inp.get("confidence", 0))
                 if conf < CONFIDENCE_THRESHOLD:
                     continue
-                results.append({
-                    "entry_reference": str(inp["entry_reference"]),
-                    "category_id": int(inp["category_id"]),
-                    "confidence": conf,
-                })
+                results.append(
+                    {
+                        "entry_reference": str(inp["entry_reference"]),
+                        "category_id": int(inp["category_id"]),
+                        "confidence": conf,
+                    }
+                )
             except (KeyError, TypeError, ValueError):
                 continue
     return results
