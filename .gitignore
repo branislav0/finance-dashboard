@@ -27,6 +27,9 @@ venv/
 *.db-shm
 backups/
 
+# Bank statements — obsahujú citlivé finančné dáta, NIKDY do gitu
+*.csv
+
 # User screenshots (local workflow only)
 screenshots/
 
