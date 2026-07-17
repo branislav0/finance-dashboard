@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,9 +46,7 @@ class EnableBankingClient:
 
     def list_aspsps(self, country: str | None = None) -> dict[str, Any]:
         params = {"country": country} if country else None
-        r = httpx.get(
-            f"{self.base_url}/aspsps", headers=self._headers(), params=params, timeout=15
-        )
+        r = httpx.get(f"{self.base_url}/aspsps", headers=self._headers(), params=params, timeout=15)
         r.raise_for_status()
         return r.json()
 
@@ -61,9 +59,11 @@ class EnableBankingClient:
         psu_type: str = "personal",
         access_days: int = DEFAULT_ACCESS_DAYS,
     ) -> dict[str, Any]:
-        valid_until = datetime.now(timezone.utc) + timedelta(days=access_days)
+        valid_until = datetime.now(UTC) + timedelta(days=access_days)
         body = {
-            "access": {"valid_until": valid_until.isoformat(timespec="seconds").replace("+00:00", "Z")},
+            "access": {
+                "valid_until": valid_until.isoformat(timespec="seconds").replace("+00:00", "Z")
+            },
             "aspsp": {"name": aspsp_name, "country": aspsp_country},
             "state": state,
             "redirect_url": redirect_url,
@@ -84,9 +84,7 @@ class EnableBankingClient:
         return r.json()
 
     def get_session(self, session_id: str) -> dict[str, Any]:
-        r = httpx.get(
-            f"{self.base_url}/sessions/{session_id}", headers=self._headers(), timeout=15
-        )
+        r = httpx.get(f"{self.base_url}/sessions/{session_id}", headers=self._headers(), timeout=15)
         r.raise_for_status()
         return r.json()
 
@@ -110,11 +108,9 @@ def from_env() -> EnableBankingClient:
     env = os.environ.get("ENABLEBANKING_ENV", "sandbox").lower()
     prefix = "ENABLEBANKING_PRODUCTION" if env == "production" else "ENABLEBANKING_SANDBOX"
     app_id = (
-        os.environ.get(f"{prefix}_APPLICATION_ID")
-        or os.environ["ENABLEBANKING_APPLICATION_ID"]
+        os.environ.get(f"{prefix}_APPLICATION_ID") or os.environ["ENABLEBANKING_APPLICATION_ID"]
     )
     key_path = (
-        os.environ.get(f"{prefix}_PRIVATE_KEY_PATH")
-        or os.environ["ENABLEBANKING_PRIVATE_KEY_PATH"]
+        os.environ.get(f"{prefix}_PRIVATE_KEY_PATH") or os.environ["ENABLEBANKING_PRIVATE_KEY_PATH"]
     )
     return EnableBankingClient(application_id=app_id, private_key_path=key_path)

@@ -57,6 +57,7 @@ def test_delete_category_promotes_children(tmp_db):
 
 def test_delete_category_unsets_transaction_category(tmp_db):
     from tests.test_db_rules import _make_session_and_account, _tx
+
     acc = _make_session_and_account()
     cid = db.add_category("Káva", "expense")
     db.upsert_transactions(acc, [_tx("r1", cp="Bistro")])

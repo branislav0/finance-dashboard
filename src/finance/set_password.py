@@ -15,7 +15,6 @@ from dotenv import load_dotenv
 
 from finance.auth import hash_password
 
-
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 
@@ -59,7 +58,10 @@ def main() -> int:
     lines = _upsert(lines, "FINANCE_PASSWORD_HASH", h)
 
     import os
-    if not os.getenv("APP_SECRET_KEY") or os.getenv("APP_SECRET_KEY", "").startswith("generate-with"):
+
+    if not os.getenv("APP_SECRET_KEY") or os.getenv("APP_SECRET_KEY", "").startswith(
+        "generate-with"
+    ):
         new_secret = secrets.token_urlsafe(32)
         lines = _upsert(lines, "APP_SECRET_KEY", new_secret)
         print("APP_SECRET_KEY vygenerovaný a uložený.")

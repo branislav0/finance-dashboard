@@ -6,6 +6,7 @@ Použitie:
 Vytlačí jednoriadkový výsledok na stdout a skončí s kódom 0 pri úspechu,
 1 pri chybe. Určené na volanie z MC Telegram bota (drop CSV → import).
 """
+
 from __future__ import annotations
 
 import sys
@@ -28,21 +29,20 @@ def import_csv(path: str | Path) -> str:
         "session_id": "manual-csob-cz",
         "aspsp": {"name": "ČSOB CZ (manual)", "country": "CZ"},
         "access": {"valid_until": None},
-        "accounts": [{
-            "uid": iban,
-            "account_id": {"iban": iban},
-            "currency": currency,
-            "name": f"ČSOB CZ {account_no}",
-        }],
+        "accounts": [
+            {
+                "uid": iban,
+                "account_id": {"iban": iban},
+                "currency": currency,
+                "name": f"ČSOB CZ {account_no}",
+            }
+        ],
     }
     ids = db.save_session_and_accounts(payload)
     inserted, updated = db.upsert_transactions(ids[0], txs)
     fx_fetched, _ = db.backfill_fx_rates()
     fx_note = f", FX kurzy +{fx_fetched}" if fx_fetched else ""
-    return (
-        f"✅ ČSOB {account_no}: {inserted} nových, "
-        f"{updated} aktualizovaných{fx_note}"
-    )
+    return f"✅ ČSOB {account_no}: {inserted} nových, {updated} aktualizovaných{fx_note}"
 
 
 def main(argv: list[str] | None = None) -> int:

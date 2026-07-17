@@ -78,7 +78,7 @@ def parse_csob_csv(content: bytes) -> tuple[dict, list[dict]]:
         if not ref:
             ref = _synth_ref(date_raw, amount_raw, msg or op)
         cd = "DBIT" if amount_val < 0 else "CRDT"
-        code = _OP_TO_CODE.get(op.lower(), None)
+        code = _OP_TO_CODE.get(op.lower())
 
         tx = {
             "entry_reference": ref,

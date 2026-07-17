@@ -4,7 +4,7 @@ import os
 import secrets
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError, InvalidHashError
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 _hasher = PasswordHasher()
@@ -27,7 +27,10 @@ def verify_password(plain: str, hashed: str) -> bool:
 def _signer() -> URLSafeTimedSerializer:
     secret = os.getenv("APP_SECRET_KEY")
     if not secret or secret.startswith("generate-with"):
-        raise RuntimeError("APP_SECRET_KEY not set in .env (generate with `python -c \"import secrets; print(secrets.token_urlsafe(32))\"`)")
+        raise RuntimeError(
+            "APP_SECRET_KEY not set in .env "
+            '(generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`)'
+        )
     return URLSafeTimedSerializer(secret, salt="finance-session-v1")
 
 

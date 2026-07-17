@@ -5,9 +5,11 @@ Fetches the official daily exchange rate fixing from cnb.cz.
 - Weekends/holidays return the previous business day's rates.
 - Rates are expressed as: `rate` CZK per `qty` units of foreign currency.
 """
+
 from __future__ import annotations
 
 from datetime import date
+
 import httpx
 
 CNB_URL = (

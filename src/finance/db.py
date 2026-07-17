@@ -4,9 +4,10 @@ import json
 import os
 import re
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC
 from pathlib import Path
-from typing import Iterator
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -146,6 +147,7 @@ def init_db() -> None:
 
 def _migrate_categories_allow_transfer() -> None:
     import sqlite3 as _sq
+
     conn = _sq.connect(_db_path())
     try:
         conn.row_factory = sqlite3.Row
@@ -351,8 +353,7 @@ def upsert_transactions(account_id: int, transactions: list[dict]) -> tuple[int,
 
 def _load_rules(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT id, category_id, pattern, field FROM category_rules "
-        "ORDER BY priority ASC, id ASC"
+        "SELECT id, category_id, pattern, field FROM category_rules ORDER BY priority ASC, id ASC"
     ).fetchall()
 
 
@@ -427,9 +428,7 @@ def generate_rules_from_manual() -> int:
     with connect() as conn:
         existing = {
             (r["pattern"], r["field"], r["category_id"])
-            for r in conn.execute(
-                "SELECT pattern, field, category_id FROM category_rules"
-            )
+            for r in conn.execute("SELECT pattern, field, category_id FROM category_rules")
         }
         rows = conn.execute(
             """SELECT counterparty_name, category_id, COUNT(DISTINCT category_id) AS cats
@@ -549,8 +548,9 @@ def consent_status(warn_days: int = 14) -> list[dict]:
     """Return one entry per linked bank session — only those expiring within
     `warn_days` or already expired. Each: {aspsp, country, valid_until,
     days_left, expired}."""
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+    from datetime import datetime
+
+    now = datetime.now(UTC)
     out: list[dict] = []
     with connect() as conn:
         rows = conn.execute(
@@ -565,21 +565,21 @@ def consent_status(warn_days: int = 14) -> list[dict]:
         days_left = (exp - now).total_seconds() / 86400
         if days_left > warn_days:
             continue
-        out.append({
-            "aspsp": r["aspsp_name"],
-            "country": r["aspsp_country"],
-            "valid_until": r["access_valid_until"][:10],
-            "days_left": int(days_left),
-            "expired": days_left < 0,
-        })
+        out.append(
+            {
+                "aspsp": r["aspsp_name"],
+                "country": r["aspsp_country"],
+                "valid_until": r["access_valid_until"][:10],
+                "days_left": int(days_left),
+                "expired": days_left < 0,
+            }
+        )
     return out
 
 
 def list_accounts() -> list[sqlite3.Row]:
     with connect() as conn:
-        return conn.execute(
-            "SELECT * FROM accounts ORDER BY updated_at DESC"
-        ).fetchall()
+        return conn.execute("SELECT * FROM accounts ORDER BY updated_at DESC").fetchall()
 
 
 def list_categories() -> list[sqlite3.Row]:
@@ -661,9 +661,7 @@ def rename_category(category_id: int, new_name: str) -> None:
 def delete_category(category_id: int) -> None:
     """Delete category. Children become roots; transactions/rules unset (FK ON DELETE SET NULL)."""
     with connect() as conn:
-        conn.execute(
-            "UPDATE categories SET parent_id = NULL WHERE parent_id = ?", (category_id,)
-        )
+        conn.execute("UPDATE categories SET parent_id = NULL WHERE parent_id = ?", (category_id,))
         conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
 
 
@@ -719,6 +717,7 @@ def set_transaction_note(account_id: int, entry_reference: str, note: str | None
 
 # ---- FX rates (ČNB) ----
 
+
 def _store_rates(conn, rate_date: str, rates: dict[str, tuple[int, float]]) -> None:
     """Insert all currencies fetched from ČNB for one date (idempotent)."""
     for code, (qty, rate) in rates.items():
@@ -745,8 +744,10 @@ def get_fx_rate(d, currency: str) -> tuple[int, float] | None:
            cached rate (covers weekends/holidays + offline mode).
         5. Still nothing → None.
     """
-    from datetime import date as _date, timedelta
-    from finance.providers.cnb import fetch_daily_rates, CnbError
+    from datetime import date as _date
+    from datetime import timedelta
+
+    from finance.providers.cnb import CnbError, fetch_daily_rates
 
     currency = currency.upper()
     if currency == "CZK":
@@ -780,8 +781,7 @@ def get_fx_rate(d, currency: str) -> tuple[int, float] | None:
         for delta in range(1, 8):
             prev = d - timedelta(days=delta)
             row = conn.execute(
-                "SELECT qty, rate_czk FROM fx_rates "
-                "WHERE rate_date = ? AND currency = ?",
+                "SELECT qty, rate_czk FROM fx_rates WHERE rate_date = ? AND currency = ?",
                 (prev.isoformat(), currency),
             ).fetchone()
             if row:
@@ -806,12 +806,16 @@ def backfill_fx_rates() -> tuple[int, int]:
     non-CZK transactions. Returns (fetched_dates, skipped_dates)."""
     fetched = skipped = 0
     with connect() as conn:
-        dates = [r["d"] for r in conn.execute(
-            "SELECT DISTINCT substr(booking_date, 1, 10) AS d "
-            "FROM transactions "
-            "WHERE currency != 'CZK' AND booking_date IS NOT NULL "
-            "ORDER BY d"
-        ).fetchall() if r["d"]]
+        dates = [
+            r["d"]
+            for r in conn.execute(
+                "SELECT DISTINCT substr(booking_date, 1, 10) AS d "
+                "FROM transactions "
+                "WHERE currency != 'CZK' AND booking_date IS NOT NULL "
+                "ORDER BY d"
+            ).fetchall()
+            if r["d"]
+        ]
     for iso in dates:
         # if any row already cached for this date, skip (we store all ccys atomically)
         with connect() as conn:
@@ -824,7 +828,9 @@ def backfill_fx_rates() -> tuple[int, int]:
             continue
         try:
             from datetime import date as _date
+
             from finance.providers.cnb import fetch_daily_rates
+
             rates = fetch_daily_rates(_date.fromisoformat(iso))
             with connect() as conn:
                 _store_rates(conn, iso, rates)

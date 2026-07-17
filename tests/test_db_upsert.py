@@ -35,11 +35,14 @@ def test_resync_preserves_manual_category(tmp_db):
 
 def test_tx_type_label_from_code(tmp_db):
     acc = _make_session_and_account()
-    db.upsert_transactions(acc, [
-        _tx("r1", code="CCRD"),
-        _tx("r2", code="RCDT"),
-        _tx("r3", code="ZZZ"),
-    ])
+    db.upsert_transactions(
+        acc,
+        [
+            _tx("r1", code="CCRD"),
+            _tx("r2", code="RCDT"),
+            _tx("r3", code="ZZZ"),
+        ],
+    )
     by_ref = {r["entry_reference"]: r for r in db.list_transactions(acc)}
     assert by_ref["r1"]["tx_type"] == "Kartová platba"
     assert by_ref["r2"]["tx_type"] == "Prijatý prevod"

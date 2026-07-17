@@ -5,18 +5,16 @@ import secrets
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
-
+from html import escape
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from html import escape
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from finance import db
-from finance import auth
+from finance import auth, db
 from finance.csv_import import parse_csob_csv
 from finance.providers import ai as ai_provider
 from finance.providers.enablebanking import from_env as enablebanking_from_env
@@ -80,14 +78,16 @@ def _daily_cashflow(today: date, currency: str = "CZK") -> dict:
     peak = max(daily) if daily else 0.0
     bars = []
     for i, v in enumerate(daily, start=1):
-        bars.append({
-            "day": i,
-            "amount": v,
-            "amount_label": _fmt(v),
-            "pct": int(round((v / peak) * 100)) if peak else 0,
-            "is_today": i == today.day,
-            "is_future": i > today.day,
-        })
+        bars.append(
+            {
+                "day": i,
+                "amount": v,
+                "amount_label": _fmt(v),
+                "pct": int(round((v / peak) * 100)) if peak else 0,
+                "is_today": i == today.day,
+                "is_future": i > today.day,
+            }
+        )
     net = income_total - expense_total
     return {
         "month": month_key,
@@ -109,7 +109,9 @@ def _cashflow_history(today: date, months: int = 6) -> dict:
         keys.append(cursor.strftime("%Y-%m"))
         cursor = (cursor - timedelta(days=1)).replace(day=1)
     keys.reverse()
-    by_ccy: dict[str, dict[str, dict[str, float]]] = {"CZK": {k: {"in": 0.0, "out": 0.0} for k in keys}}
+    by_ccy: dict[str, dict[str, dict[str, float]]] = {
+        "CZK": {k: {"in": 0.0, "out": 0.0} for k in keys}
+    }
     with db.connect() as conn:
         for r in conn.execute(
             "SELECT substr(t.booking_date, 1, 7) AS m, t.booking_date, t.currency, "
@@ -142,12 +144,14 @@ def _cashflow_history(today: date, months: int = 6) -> dict:
         for k in keys:
             d = monthly[k]
             peak = max(peak, d["in"], d["out"])
-            rows.append({
-                "month": k[5:],
-                "income": d["in"],
-                "expense": d["out"],
-                "net": d["in"] - d["out"],
-            })
+            rows.append(
+                {
+                    "month": k[5:],
+                    "income": d["in"],
+                    "expense": d["out"],
+                    "net": d["in"] - d["out"],
+                }
+            )
         for r in rows:
             r["in_pct"] = int(round((r["income"] / peak) * 100)) if peak else 0
             r["out_pct"] = int(round((r["expense"] / peak) * 100)) if peak else 0
@@ -178,6 +182,7 @@ def _buffer_progress(today: date) -> dict:
     remaining = max(0.0, target - saved)
     pct = min(100, int(round((saved / target) * 100))) if target else 0
     import math
+
     paychecks_left = math.ceil(remaining / _BUFFER_PER_PAYCHECK_CZK) if remaining > 0 else 0
     months_done = today.month - 1 + (today.day / 30.0)
     pace = saved / months_done if months_done > 0 else 0.0
@@ -226,9 +231,15 @@ def _master_plan_progress(today: date) -> dict:
     cats = db.list_categories()
     budgeted = [dict(c) for c in cats if c["monthly_budget_czk"] and c["kind"] == "expense"]
     if not budgeted:
-        return {"period_start": period_start, "period_end": period_end, "rows": [],
-                "total_budget": 0, "total_spent": 0, "total_remaining": 0,
-                "total_pct": 0}
+        return {
+            "period_start": period_start,
+            "period_end": period_end,
+            "rows": [],
+            "total_budget": 0,
+            "total_spent": 0,
+            "total_remaining": 0,
+            "total_pct": 0,
+        }
 
     spent: dict[int, float] = {c["id"]: 0.0 for c in budgeted}
     with db.connect() as conn:
@@ -262,19 +273,21 @@ def _master_plan_progress(today: date) -> dict:
         sp = spent[c["id"]]
         remaining = budget - sp
         pct = min(100, int(round((sp / budget) * 100))) if budget else 0
-        items.append({
-            "id": c["id"],
-            "name": c["name"],
-            "budget": budget,
-            "budget_label": _fmt(budget),
-            "spent": sp,
-            "spent_label": _fmt(sp),
-            "remaining": remaining,
-            "remaining_label": _fmt(abs(remaining)),
-            "remaining_pos": remaining >= 0,
-            "pct": pct,
-            "over": sp > budget,
-        })
+        items.append(
+            {
+                "id": c["id"],
+                "name": c["name"],
+                "budget": budget,
+                "budget_label": _fmt(budget),
+                "spent": sp,
+                "spent_label": _fmt(sp),
+                "remaining": remaining,
+                "remaining_label": _fmt(abs(remaining)),
+                "remaining_pos": remaining >= 0,
+                "pct": pct,
+                "over": sp > budget,
+            }
+        )
         total_budget += budget
         total_spent += sp
     items.sort(key=lambda x: x["pct"], reverse=True)
@@ -370,8 +383,13 @@ def _sidebar_context(request: Request | None = None) -> dict:
 
     cats = db.list_categories()
     income_cats = [
-        {"id": c["id"], "name": c["name"], "amt": _fmt(income.get(c["name"], 0.0), "CZK") if income.get(c["name"]) else None}
-        for c in cats if c["kind"] == "income" and c["parent_id"] is None
+        {
+            "id": c["id"],
+            "name": c["name"],
+            "amt": _fmt(income.get(c["name"], 0.0), "CZK") if income.get(c["name"]) else None,
+        }
+        for c in cats
+        if c["kind"] == "income" and c["parent_id"] is None
     ]
     expense_cats = [
         {
@@ -380,7 +398,8 @@ def _sidebar_context(request: Request | None = None) -> dict:
             "amt": _fmt(expense.get(c["name"], 0.0), "CZK") if expense.get(c["name"]) else None,
             "budget": _fmt(c["monthly_budget_czk"]) if c["monthly_budget_czk"] else None,
         }
-        for c in cats if c["kind"] == "expense" and c["parent_id"] is None
+        for c in cats
+        if c["kind"] == "expense" and c["parent_id"] is None
     ]
     accounts = db.list_accounts()
     return {
@@ -394,6 +413,7 @@ def _sidebar_context(request: Request | None = None) -> dict:
         "sb_month": sb_month,
         "sb_months_available": _sidebar_months(12),
     }
+
 
 _pending_states: dict[str, dict[str, str]] = {}
 
@@ -506,13 +526,15 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
     for ccy in sorted(per_ccy.keys()):
         b = per_ccy[ccy]
         net = b["income"] - b["expense"]
-        kpi_currencies.append({
-            "currency": ccy,
-            "income": _fmt(b["income"]),
-            "expense": _fmt(b["expense"]),
-            "net": ("+" if net >= 0 else "") + _fmt(net),
-            "net_pos": net >= 0,
-        })
+        kpi_currencies.append(
+            {
+                "currency": ccy,
+                "income": _fmt(b["income"]),
+                "expense": _fmt(b["expense"]),
+                "net": ("+" if net >= 0 else "") + _fmt(net),
+                "net_pos": net >= 0,
+            }
+        )
     kpi = {
         "currencies": kpi_currencies,
         "count": str(tx_count),
@@ -566,7 +588,9 @@ def index(request: Request, month: str | None = None, synced: str | None = None)
 def categorize_ai() -> RedirectResponse:
     txs = db.list_uncategorized_transactions(limit=200)
     if not txs:
-        return RedirectResponse(url="/transactions?ai_msg=Žiadne+nezaradené+transakcie", status_code=303)
+        return RedirectResponse(
+            url="/transactions?ai_msg=Žiadne+nezaradené+transakcie", status_code=303
+        )
     cats = db.categories_with_parent_name()
     examples = db.list_manual_examples(limit=40)
     try:
@@ -574,7 +598,9 @@ def categorize_ai() -> RedirectResponse:
     except ai_provider.CategorizationError as e:
         return RedirectResponse(url=f"/transactions?ai_err={escape(str(e))}", status_code=303)
     except Exception as e:
-        return RedirectResponse(url=f"/transactions?ai_err=AI+failed:+{escape(str(e)[:80])}", status_code=303)
+        return RedirectResponse(
+            url=f"/transactions?ai_err=AI+failed:+{escape(str(e)[:80])}", status_code=303
+        )
     applied = 0
     for r in results:
         try:
@@ -607,7 +633,9 @@ def _account_id_for_ref(entry_ref: str) -> int:
 def fx_refresh():
     """Backfill ČNB rates for all distinct non-CZK transaction dates."""
     fetched, skipped = db.backfill_fx_rates()
-    return RedirectResponse(url=f"/?fx_msg=fetched+{fetched}+dates,+cached+{skipped}", status_code=303)
+    return RedirectResponse(
+        url=f"/?fx_msg=fetched+{fetched}+dates,+cached+{skipped}", status_code=303
+    )
 
 
 @app.post("/sb-month")
@@ -737,12 +765,14 @@ async def import_submit(file: UploadFile = File(...)) -> RedirectResponse:
         "session_id": session_id,
         "aspsp": {"name": "ČSOB CZ (manual)", "country": "CZ"},
         "access": {"valid_until": None},
-        "accounts": [{
-            "uid": iban,
-            "account_id": {"iban": iban},
-            "currency": currency,
-            "name": f"ČSOB CZ {account_no}",
-        }],
+        "accounts": [
+            {
+                "uid": iban,
+                "account_id": {"iban": iban},
+                "currency": currency,
+                "name": f"ČSOB CZ {account_no}",
+            }
+        ],
     }
     ids = db.save_session_and_accounts(payload)
     account_id = ids[0]
@@ -1039,11 +1069,16 @@ def summary_view(request: Request):
             is_transfer = kind == "transfer"
             if want_transfer != is_transfer:
                 continue
-            out.append({
-                "cat": cat, "cur": cur,
-                "in_": v["in"], "out": v["out"],
-                "net": v["in"] - v["out"], "cnt": v["cnt"],
-            })
+            out.append(
+                {
+                    "cat": cat,
+                    "cur": cur,
+                    "in_": v["in"],
+                    "out": v["out"],
+                    "net": v["in"] - v["out"],
+                    "cnt": v["cnt"],
+                }
+            )
         return sorted(out, key=lambda x: (x["cat"], x["cur"]))
 
     ctx = {
@@ -1072,13 +1107,9 @@ def set_tx_category(
         if rules_added:
             auto_applied, _ = db.recategorize_all()
     if "application/json" in request.headers.get("accept", ""):
-        return JSONResponse(
-            {"rules_added": rules_added, "auto_applied": auto_applied}
-        )
+        return JSONResponse({"rules_added": rules_added, "auto_applied": auto_applied})
     anchor = f"#tx-{entry_ref}"
-    return RedirectResponse(
-        url=f"/accounts/{account_id}/tx?uncat={uncat}{anchor}", status_code=303
-    )
+    return RedirectResponse(url=f"/accounts/{account_id}/tx?uncat={uncat}{anchor}", status_code=303)
 
 
 @app.post("/accounts/{account_id}/tx/{entry_ref:path}/hide")
@@ -1101,9 +1132,7 @@ def set_tx_note(
     uncat: int = Form(0),
 ) -> RedirectResponse:
     db.set_transaction_note(account_id, entry_ref, note.strip() or None)
-    return RedirectResponse(
-        url=f"/accounts/{account_id}/tx?uncat={uncat}", status_code=303
-    )
+    return RedirectResponse(url=f"/accounts/{account_id}/tx?uncat={uncat}", status_code=303)
 
 
 if __name__ == "__main__":

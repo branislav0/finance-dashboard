@@ -21,8 +21,14 @@ def _make_session_and_account(session_id: str = "S1") -> int:
     return ids[0]
 
 
-def _tx(ref: str, *, cp: str | None = None, info: str | None = None,
-        amount: str = "10.00", code: str | None = None) -> dict:
+def _tx(
+    ref: str,
+    *,
+    cp: str | None = None,
+    info: str | None = None,
+    amount: str = "10.00",
+    code: str | None = None,
+) -> dict:
     t: dict = {
         "entry_reference": ref,
         "booking_date": "2026-04-20",
@@ -104,11 +110,14 @@ def test_recategorize_updates_non_manual(tmp_db):
 def test_generate_rules_from_manual(tmp_db):
     acc = _make_session_and_account()
     cats = {c["name"]: c["id"] for c in db.list_categories()}
-    db.upsert_transactions(acc, [
-        _tx("r1", cp="Lidl"),
-        _tx("r2", cp="Lidl"),
-        _tx("r3", cp="Kaufland"),
-    ])
+    db.upsert_transactions(
+        acc,
+        [
+            _tx("r1", cp="Lidl"),
+            _tx("r2", cp="Lidl"),
+            _tx("r3", cp="Kaufland"),
+        ],
+    )
     db.set_transaction_category(acc, "r1", cats["Supermarkety"], manual=True)
     db.set_transaction_category(acc, "r2", cats["Supermarkety"], manual=True)
     added = db.generate_rules_from_manual()

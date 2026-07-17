@@ -7,6 +7,7 @@ Verifies:
 
 Usage: uv run python scripts/smoke_enablebanking.py [COUNTRY_CODE]
 """
+
 from __future__ import annotations
 
 import json
