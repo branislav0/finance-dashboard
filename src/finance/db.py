@@ -269,6 +269,24 @@ def save_session_and_accounts(session_payload: dict) -> list[int]:
                     ),
                 )
                 ids.append(cur.lastrowid)
+        # Re-connecting a bank yields a fresh session_id; once its accounts are
+        # re-pointed to the new session, the previous session for the same bank
+        # is left orphaned. Remove those superseded, account-less sessions so
+        # their near expiry no longer triggers consent alerts. Only runs when the
+        # new session actually carried accounts, so a freshly linked session that
+        # has no accounts yet (but a valid consent) is kept.
+        if accounts:
+            conn.execute(
+                """DELETE FROM sessions
+                   WHERE aspsp_name = ? AND aspsp_country = ?
+                     AND session_id != ?
+                     AND session_id NOT IN (SELECT DISTINCT session_id FROM accounts)""",
+                (
+                    session_payload.get("aspsp", {}).get("name", ""),
+                    session_payload.get("aspsp", {}).get("country", ""),
+                    session_id,
+                ),
+            )
     return ids
 
 
